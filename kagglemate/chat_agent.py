@@ -1162,14 +1162,18 @@ def _ensure_data(slug: str):
 # ── Conversation Loop ──
 
 
-def _build_system_prompt() -> str:
-    """Build system prompt with actual user info — using mentor persona."""
+def _build_system_prompt(session_state=None) -> str:
+    """Build system prompt with user info + session memory."""
     from kagglemate.mentor import MENTOR_SYSTEM_PROMPT_TEMPLATE
+    from kagglemate.session_memory import build_memory_context
     username = config.KAGGLE_USERNAME or _read_kaggle_username()
-    return MENTOR_SYSTEM_PROMPT_TEMPLATE.format(
+    prompt = MENTOR_SYSTEM_PROMPT_TEMPLATE.format(
         kaggle_username=username or "unknown",
         tool_count=len(TOOLS),
     )
+    if session_state and session_state.current_competition:
+        prompt += "\n\n" + build_memory_context(session_state)
+    return prompt
 
 
 def _read_kaggle_username() -> str:
@@ -1188,13 +1192,19 @@ def chat():
     """Start the conversational KaggleMate agent."""
     _print_welcome()
 
+    # ── Load session memory / 加载会话记忆 ──
+    from kagglemate.session_memory import load_session, save_session, record_action
+    from kagglemate.session_memory import SessionState
+
+    session = load_session()
+
     client = OpenAI(
         api_key=config.LLM_API_KEY,
         base_url=config.LLM_BASE_URL,
     )
 
     executor = ToolExecutor()
-    system_prompt = _build_system_prompt()
+    system_prompt = _build_system_prompt(session)
     messages = [{"role": "system", "content": system_prompt}]
 
     # ── Initialize Harness (safety layer) / 初始化安全护栏 ──
@@ -1204,18 +1214,23 @@ def chat():
     harness = Harness(executor, io_handler=input)
 
     # Wire CompetitionGate as a Harness pre-hook
-    # This ensures the LLM CANNOT call tools that don't apply to the current competition type
     comp_gate = get_competition_gate()
     harness.add_pre_hook(comp_gate.check)
 
-    # Show harness status on startup
+    # Show harness status + memory state on startup
+    mem_hint = ""
+    if session.current_competition:
+        mem_hint = f"  [dim]记忆: 上次在打 [yellow]{session.current_competition}[/] (第{session.restart_count+1}次会话)[/]\n"
     console.print(f"  [dim]护栏: 确认门控={harness.confirmation_required}, "
                   f"类型门控=✓, 审计={harness.audit.count()}条[/]")
+    if mem_hint:
+        console.print(mem_hint)
 
     while True:
         try:
             user_input = console.input("\n[bold green]你[/]: ")
         except (EOFError, KeyboardInterrupt):
+            _save_and_bye(session, executor, client)
             console.print("\n[dim]再见！[/]\n")
             break
 
@@ -1223,6 +1238,7 @@ def chat():
             continue
 
         if user_input.lower() in ("exit", "quit", "退出", "q"):
+            _save_and_bye(session, executor, client)
             _print_session_summary(harness)
             console.print("[dim]再见！Good luck with Kaggle! 🚀[/]\n")
             break
@@ -1233,6 +1249,9 @@ def chat():
             continue
         if user_input.strip().lower() in ("/audit"):
             _show_audit_trail(harness)
+            continue
+        if user_input.strip().lower() in ("/memory", "/remember"):
+            _show_session_memory(session)
             continue
         if user_input.strip().lower() in ("/yesall", "/yes"):
             harness.confirmation_gate.super_confirm_mode = True
@@ -1309,6 +1328,11 @@ def chat():
                         f"[red]{result}[/]",
                         title="Harness / 护栏拦截", border_style="red"
                     ))
+
+                # ── Record to session memory / 记录到会话记忆 ──
+                slug = args.get("competition_slug", "")
+                summary = result[:120] if success else f"BLOCKED: {result[:80]}"
+                record_action(session, tool_name, slug, summary, success)
 
                 # Append tool result to messages
                 messages.append({
@@ -1405,6 +1429,35 @@ def _show_audit_trail(harness):
         )
 
     console.print(table)
+
+
+def _save_and_bye(session, executor, client):
+    """Save session state on exit. Try to generate a brief summary."""
+    from kagglemate.session_memory import save_session
+    # Generate a brief session summary if there were actions
+    if session.last_actions and len(session.last_actions) >= 3:
+        try:
+            action_list = "\n".join(
+                f"- {a.get('tool','?')}: {a.get('summary','')[:80]}"
+                for a in session.last_actions[-5:]
+            )
+            summary_prompt = f"The user is ending their KaggleMate session. Based on these actions, write ONE sentence (max 80 chars) summarizing what was accomplished. Be specific. Output only the sentence.\n\n{action_list}"
+            resp = client.chat.completions.create(
+                model=config.LLM_FLASH_MODEL,
+                messages=[{"role": "user", "content": summary_prompt}],
+                max_tokens=100,
+                extra_body={"thinking": {"type": "disabled"}} if config.LLM_PROVIDER == "deepseek" else None,
+            )
+            session.session_summary = (resp.choices[0].message.content or "").strip()[:200]
+        except Exception:
+            pass
+    save_session(session)
+
+
+def _show_session_memory(session):
+    """Display current session memory."""
+    from kagglemate.session_memory import build_memory_context
+    console.print(Panel(build_memory_context(session) or "(空)", title="Session Memory / 会话记忆", border_style="blue"))
 
 
 def _show_competition_types(comp_gate):
