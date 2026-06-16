@@ -30,7 +30,12 @@ console = Console()
 
 # ── System Prompt ──
 
-SYSTEM_PROMPT = """You are KaggleMate, a Kaggle competition assistant. You help users research competitions, build models, track experiments, and submit predictions. You are proactive, helpful, and communicate in the user's language.
+SYSTEM_PROMPT_TEMPLATE = """You are KaggleMate, a Kaggle competition assistant. You help users research competitions, build models, track experiments, and submit predictions. You are proactive, helpful, and communicate in the user's language.
+
+## User Info
+- Kaggle username: {kaggle_username}
+- Kaggle API credentials: configured (at ~/.kaggle/kaggle.json)
+- The user can submit to Kaggle — their API key is ready.
 
 ## Your Capabilities
 - Research any Kaggle competition: download data, profile it, analyze public notebooks, generate strategy documents
@@ -866,6 +871,24 @@ def _ensure_data(slug: str):
 # ── Conversation Loop ──
 
 
+def _build_system_prompt() -> str:
+    """Build system prompt with actual user info."""
+    username = config.KAGGLE_USERNAME or _read_kaggle_username()
+    return SYSTEM_PROMPT_TEMPLATE.format(kaggle_username=username or "unknown")
+
+
+def _read_kaggle_username() -> str:
+    """Read Kaggle username from ~/.kaggle/kaggle.json."""
+    try:
+        kaggle_json = Path.home() / ".kaggle" / "kaggle.json"
+        if kaggle_json.exists():
+            data = json.loads(kaggle_json.read_text())
+            return data.get("username", "")
+    except Exception:
+        pass
+    return ""
+
+
 def chat():
     """Start the conversational KaggleMate agent."""
     _print_welcome()
@@ -876,7 +899,8 @@ def chat():
     )
 
     executor = ToolExecutor()
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    system_prompt = _build_system_prompt()
+    messages = [{"role": "system", "content": system_prompt}]
 
     while True:
         try:
