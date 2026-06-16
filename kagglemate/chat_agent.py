@@ -1,10 +1,11 @@
 """Conversational Agent — talk to KaggleMate in natural language.
 
 Architecture:
-    You (自然语言) → DeepSeek V4 Pro → tool calls → execute nodes → response → 你
+    You (自然语言) → DeepSeek V4 Pro → tool calls → Harness (safety gates) → execute nodes → response → 你
 
 The 13 LangGraph nodes are exposed as callable tools.
 DeepSeek acts as the "brain": understands intent, calls tools, synthesizes responses.
+Harness acts as the "safety layer": code-level enforcement the LLM cannot bypass.
 """
 
 from __future__ import annotations
@@ -1036,6 +1037,14 @@ def chat():
     system_prompt = _build_system_prompt()
     messages = [{"role": "system", "content": system_prompt}]
 
+    # ── Initialize Harness (safety layer) / 初始化安全护栏 ──
+    from kagglemate.harness import Harness
+    harness = Harness(executor, io_handler=input)
+
+    # Show harness status on startup
+    console.print(f"  [dim]护栏状态: 确认门控={harness.confirmation_required}, "
+                  f"审计日志={harness.audit.count()}条[/]")
+
     while True:
         try:
             user_input = console.input("\n[bold green]你[/]: ")
@@ -1047,8 +1056,25 @@ def chat():
             continue
 
         if user_input.lower() in ("exit", "quit", "退出", "q"):
+            _print_session_summary(harness)
             console.print("[dim]再见！Good luck with Kaggle! 🚀[/]\n")
             break
+
+        # ── Harness control commands / 护栏控制命令 ──
+        if user_input.strip().lower() in ("/harness", "/status"):
+            console.print(Panel(harness.status(), title="Harness", border_style="blue"))
+            continue
+        if user_input.strip().lower() in ("/audit"):
+            _show_audit_trail(harness)
+            continue
+        if user_input.strip().lower() in ("/yesall", "/yes"):
+            harness.confirmation_gate.super_confirm_mode = True
+            console.print("[yellow]⚠️ 超级确认模式已开启 — 危险操作将自动批准（本次会话）[/]")
+            continue
+        if user_input.strip().lower() in ("/noyesall", "/noyes"):
+            harness.confirmation_gate.super_confirm_mode = False
+            console.print("[green]✅ 超级确认模式已关闭[/]")
+            continue
 
         messages.append({"role": "user", "content": user_input})
 
@@ -1099,11 +1125,17 @@ def chat():
                 # Show what the agent is doing
                 action_desc = _action_description(tool_name, args)
                 with Live(Spinner("dots", text=f"  {action_desc}"), console=console, transient=True):
-                    result = executor.execute(tool_name, args)
+                    success, result = harness.execute(tool_name, args)
                     time.sleep(0.3)  # brief pause so spinner is visible
 
                 # Show result
-                console.print(Panel(Markdown(result), title="KaggleMate", border_style="cyan"))
+                if success:
+                    console.print(Panel(Markdown(result), title="KaggleMate", border_style="cyan"))
+                else:
+                    console.print(Panel(
+                        f"[red]{result}[/]",
+                        title="Harness / 护栏拦截", border_style="red"
+                    ))
 
                 # Append tool result to messages
                 messages.append({
@@ -1160,6 +1192,44 @@ def _action_description(tool_name: str, args: dict) -> str:
     return descriptions.get(tool_name, f"调用 {tool_name}...")
 
 
+def _print_session_summary(harness):
+    """Print session stats on exit."""
+    console.print()
+    console.print(Panel(
+        f"{harness.status()}\n\n"
+        f"[dim]审计日志保存在: {harness.audit.log_path}[/]",
+        title="Session Summary / 会话总结", border_style="blue"
+    ))
+
+
+def _show_audit_trail(harness):
+    """Display recent audit entries."""
+    entries = harness.audit.recent(20)
+    if not entries:
+        console.print("[dim]暂无审计记录。[/]")
+        return
+
+    from rich.table import Table
+    table = Table(title="Audit Trail / 审计日志 (最近 20 条)")
+    table.add_column("时间", style="dim")
+    table.add_column("操作")
+    table.add_column("风险等级")
+    table.add_column("结果", style="green")
+    table.add_column("拦截", style="red")
+
+    for e in entries:
+        time_str = e["timestamp"][11:19]  # HH:MM:SS
+        table.add_row(
+            time_str,
+            e["tool"][:25],
+            e["risk_level"][:12],
+            "✓" if e["success"] else "✗",
+            "⛔" if e["blocked"] else "",
+        )
+
+    console.print(table)
+
+
 def _print_welcome():
     """Print welcome banner."""
     console.print()
@@ -1169,9 +1239,11 @@ def _print_welcome():
         "• \"帮我研究一下 titanic 比赛\"\n"
         "• \"生成一个 baseline\"\n"
         "• \"跑一下训练\"\n"
-        "• \"现在最佳分数是多少？给点建议\"\n"
-        "• \"用 Optuna 调参 50 次\"\n"
+        "• \"给点建议\"\n"
         "• \"融合实验 1 和实验 2\"\n\n"
+        "[bold]Harness 护栏已启用[/] — 提交等危险操作需要人工确认\n"
+        "/harness 查看护栏状态  /audit 查看审计日志\n"
+        "/yesall 批量确认  /noyesall 恢复确认\n\n"
         "[dim]输入 'exit' 退出 / Type 'exit' to quit[/]",
         title="欢迎 / Welcome",
         border_style="cyan",

@@ -36,6 +36,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 import typer
 from rich.console import Console
 from rich.table import Table
+from rich.panel import Panel
 
 from kagglemate.config import config
 from kagglemate.tools.kaggle_cli import KaggleCLI
@@ -1209,6 +1210,67 @@ def ensemble(
                 console.print(f"\n[bold]Next:[/] python main.py submission submit -c {competition} -f {sub_path}")
             else:
                 console.print(f"  Validation: [red]✗ {len(vr.errors)} errors[/]")
+
+
+# ── harness: view safety harness status / audit log ──
+
+
+@app.command()
+def harness(action: str = typer.Argument("status", help="status | audit | clear")):
+    """View agent harness status or audit trail."""
+    from kagglemate.harness import AuditTrail, SessionBudget
+    from kagglemate.harness import TOOL_RISK_LEVELS
+
+    if action == "status":
+        audit = AuditTrail()
+        console.print(Panel(
+            f"审计日志: {audit.count()} 条\n"
+            f"审计文件: {audit.log_path}\n"
+            f"工具风险分级: {len(TOOL_RISK_LEVELS)} 个工具已分类",
+            title="Harness / 安全护栏",
+            border_style="blue",
+        ))
+        console.print("\n[bold]风险等级分布:[/]")
+        from kagglemate.harness import RiskLevel
+        for level in [RiskLevel.SAFE, RiskLevel.READ_ONLY, RiskLevel.SIDE_EFFECT, RiskLevel.DANGEROUS, RiskLevel.CRITICAL]:
+            tools = [t for t, l in TOOL_RISK_LEVELS.items() if l == level]
+            if tools:
+                icons = {RiskLevel.SAFE: "🟢", RiskLevel.READ_ONLY: "🔵", RiskLevel.SIDE_EFFECT: "🟡",
+                         RiskLevel.DANGEROUS: "🔴", RiskLevel.CRITICAL: "⛔"}
+                console.print(f"  {icons.get(level, '•')} {level}: {', '.join(tools[:6])}")
+
+    elif action == "audit":
+        audit = AuditTrail()
+        entries = audit.recent(30)
+        if not entries:
+            console.print("[dim]暂无审计记录。[/]")
+            return
+        from rich.table import Table
+        table = Table(title=f"Audit Trail ({len(entries)} entries)")
+        table.add_column("Time", style="dim")
+        table.add_column("Tool")
+        table.add_column("Risk")
+        table.add_column("OK")
+        table.add_column("Blocked")
+        table.add_column("Summary")
+        for e in entries:
+            table.add_row(
+                e["timestamp"][11:19],
+                e["tool"][:22],
+                e["risk_level"][:10],
+                "✓" if e["success"] else "✗",
+                "⛔" if e["blocked"] else "",
+                e.get("result_summary", "")[:50],
+            )
+        console.print(table)
+
+    elif action == "clear":
+        audit = AuditTrail()
+        audit.log_path.unlink(missing_ok=True)
+        console.print("[green]✅ Audit log cleared.[/]")
+
+    else:
+        console.print("[yellow]Usage: python main.py harness [status|audit|clear][/]")
 
 
 # ── chat: conversational agent (default) ──
