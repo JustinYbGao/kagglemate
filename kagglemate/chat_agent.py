@@ -31,49 +31,7 @@ console = Console()
 
 # ── System Prompt ──
 
-SYSTEM_PROMPT_TEMPLATE = """You are KaggleMate, a Kaggle competition assistant. You help users research competitions, build models, track experiments, and submit predictions. You are proactive, helpful, and communicate in the user's language.
-
-## User Info
-- Kaggle username: {kaggle_username}
-- Kaggle API credentials: configured (at ~/.kaggle/kaggle.json)
-- The user can submit to Kaggle — their API key is ready.
-
-## Your Capabilities
-- Research any Kaggle competition: download data, profile it, analyze public notebooks, generate strategy documents
-- Generate and run baseline ML models (LightGBM, XGBoost, CatBoost)
-- Tune hyperparameters with Optuna
-- Blend multiple submissions into ensembles
-- Track experiments in a database
-- Validate submissions before uploading
-- Submit predictions to Kaggle (the user has Kaggle API credentials configured)
-- Check submission status and leaderboard scores
-- Check what you can/cannot do for a competition type (use the what_can_i_do tool)
-- Read generated reports (SPEC.md, data_profile.md, etc.) with the read_generated_file tool
-- Pull public notebooks from Kaggle
-
-## How to Behave
-1. **Be conversational** — speak naturally, like a teammate. If the user speaks Chinese, respond in Chinese.
-2. **Be proactive** — after completing a task, suggest the logical next step.
-3. **Explain your actions** — before running a slow task (research, training, tuning), tell the user what you're about to do.
-4. **NEVER submit to Kaggle without explicit user confirmation.** Submissions consume daily quota.
-5. **Track context** — remember the current competition the user is working on.
-6. **When uncertain**, ask the user rather than guessing.
-
-## Competition Context
-The user is working on competitions. The most common workflow is:
-1. Research a competition → 2. Generate baseline → 3. Run it → 4. Get suggestions → 5. Iterate → 6. Submit
-
-Guide the user through this flow naturally.
-
-## IMPORTANT: Finding user's competitions
-When the user asks "what competitions am I in?" or "我的比赛", you MUST call list_competitions with group="entered". This returns exactly the competitions the user has joined. Do NOT list all competitions or guess — use the tool.
-
-## CRITICAL: Tool Calling Rules
-- ONLY use the tools listed above. You have 16 tools. Use them.
-- NEVER output raw XML, HTML, or tool-call-like tags (like <invoke> or <tool_call>). Use the function calling system.
-- NEVER pretend to call a tool that doesn't exist. If you need to read a file, use read_generated_file.
-- After research_competition completes, USE read_generated_file to read SPEC.md or data_profile.md for details before responding.
-- If the competition is NOT tabular CSV (e.g. JSON files, images, audio), explain this to the user. Don't pretend LightGBM can solve it."""
+# System prompt moved to kagglemate/mentor.py (mentor persona with teaching emphasis)
 
 # ── Tool Definitions ──
 
@@ -360,6 +318,58 @@ TOOLS = [
                     "competition_slug": {"type": "string", "description": "比赛标识 / Competition slug"}
                 },
                 "required": ["competition_slug"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "explain_notebook",
+            "description": "拉取并深度讲解一个 Kaggle Notebook——逐段解析代码，解释每部分做了什么、为什么这样写、涉及的 ML 概念、以及你可以学到什么。/ Pull and deeply explain a notebook: walk through code section by section, explain ML concepts, and highlight what you can learn. Use this when the user wants to UNDERSTAND a notebook, not just execute it.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "kernel_ref": {
+                        "type": "string",
+                        "description": "Notebook 引用，如 'alexisbcook/titanic-tutorial' / Kernel reference"
+                    },
+                    "competition_slug": {"type": "string", "description": "比赛标识 / Competition slug"}
+                },
+                "required": ["kernel_ref", "competition_slug"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "explain_concept",
+            "description": "讲解一个机器学习概念，用当前比赛的数据举例，让概念变得具体可感。/ Explain an ML concept using the current competition's data as examples. Use this when the user asks 'what is X?' or 'why do people use Y?'",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "concept": {
+                        "type": "string",
+                        "description": "要讲解的概念，如 'target encoding', 'stratified k-fold', 'SHAP values', 'feature interaction'"
+                    },
+                    "competition_slug": {"type": "string", "description": "比赛标识（用于获取数据上下文）/ Competition slug for context"}
+                },
+                "required": ["concept", "competition_slug"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compare_approaches",
+            "description": "对比两个实验，分析分数差异的原因，总结可以学到的经验。/ Compare two experiments side-by-side: explain WHY scores differ and what generalizable lesson can be learned.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "competition_slug": {"type": "string", "description": "比赛标识 / Competition slug"},
+                    "experiment_a_id": {"type": "integer", "description": "第一个实验的 ID"},
+                    "experiment_b_id": {"type": "integer", "description": "第二个实验的 ID"}
+                },
+                "required": ["competition_slug", "experiment_a_id", "experiment_b_id"]
             }
         }
     },
@@ -970,6 +980,49 @@ class ToolExecutor:
         comp_type = comp_gate.get_competition_type(slug)
         return get_type_summary(comp_type)
 
+    def _tool_explain_notebook(self, args: dict) -> str:
+        kernel_ref = args["kernel_ref"]
+        slug = args["competition_slug"]
+        self.current_competition = slug
+
+        from kagglemate.mentor import explain_notebook
+        # Try to load competition context
+        context = _load_competition_context(slug)
+        return explain_notebook(
+            competition_slug=slug,
+            kernel_ref=kernel_ref,
+            **context,
+        )
+
+    def _tool_explain_concept(self, args: dict) -> str:
+        concept = args["concept"]
+        slug = args["competition_slug"]
+        self.current_competition = slug
+
+        from kagglemate.mentor import explain_concept
+        context = _load_competition_context(slug)
+        return explain_concept(concept=concept, competition_slug=slug, **context)
+
+    def _tool_compare_approaches(self, args: dict) -> str:
+        slug = args["competition_slug"]
+        id_a = args["experiment_a_id"]
+        id_b = args["experiment_b_id"]
+
+        from kagglemate.memory.experiment_store import ExperimentStore
+        from kagglemate.mentor import compare_approaches
+
+        store = ExperimentStore(slug)
+        exp_a = store.get(id_a)
+        exp_b = store.get(id_b)
+
+        if not exp_a:
+            return f"实验 #{id_a} 不存在。"
+        if not exp_b:
+            return f"实验 #{id_b} 不存在。"
+
+        context = _load_competition_context(slug)
+        return compare_approaches(experiment_a=exp_a, experiment_b=exp_b, **context)
+
     def _tool_read_generated_file(self, args: dict) -> str:
         slug = args["competition_slug"]
         filename = args["filename"]
@@ -1003,6 +1056,34 @@ class ToolExecutor:
 
 
 # ── Helpers ──
+
+
+def _load_competition_context(slug: str) -> dict:
+    """Load competition context for mentor explanations."""
+    ctx = {"competition_name": slug, "competition_type": "unknown",
+           "target_col": "unknown", "evaluation_metric": "unknown",
+           "target_distribution": "", "train_shape": "", "key_features": ""}
+    try:
+        data_dir = config.COMPETITIONS_DIR / slug / "data" / "raw"
+        if data_dir.exists():
+            csvs = list(data_dir.glob("train*.csv"))
+            if csvs:
+                import pandas as pd
+                df = pd.read_csv(csvs[0])
+                ctx["train_shape"] = f"{len(df)} rows × {len(df.columns)} cols"
+                ctx["key_features"] = ", ".join(df.columns[:10].tolist())
+        # Try to load from SPEC
+        spec_path = config.COMPETITIONS_DIR / slug / "reports" / "SPEC.md"
+        if spec_path.exists():
+            content = spec_path.read_text()
+            for line in content.split("\n"):
+                if "Type / 类型" in line and "tabular" in line:
+                    ctx["competition_type"] = "tabular_classification"
+                if "Metric / 指标" in line:
+                    ctx["evaluation_metric"] = line.split("|")[3].strip() if "|" in line else "unknown"
+    except Exception:
+        pass
+    return ctx
 
 
 def _load_notebook_summaries(slug: str) -> list:
@@ -1082,9 +1163,13 @@ def _ensure_data(slug: str):
 
 
 def _build_system_prompt() -> str:
-    """Build system prompt with actual user info."""
+    """Build system prompt with actual user info — using mentor persona."""
+    from kagglemate.mentor import MENTOR_SYSTEM_PROMPT_TEMPLATE
     username = config.KAGGLE_USERNAME or _read_kaggle_username()
-    return SYSTEM_PROMPT_TEMPLATE.format(kaggle_username=username or "unknown")
+    return MENTOR_SYSTEM_PROMPT_TEMPLATE.format(
+        kaggle_username=username or "unknown",
+        tool_count=len(TOOLS),
+    )
 
 
 def _read_kaggle_username() -> str:
@@ -1274,6 +1359,9 @@ def _action_description(tool_name: str, args: dict) -> str:
         "read_generated_file": "读取生成的文件...",
         "what_can_i_do": "查询能力边界...",
         "deep_research": f"深度调研 {slug} (Kaggle+arXiv+Web)...",
+        "explain_notebook": f"讲解 Notebook: {args.get('kernel_ref', '')}...",
+        "explain_concept": f"讲解概念: {args.get('concept', '')}...",
+        "compare_approaches": "对比实验方案...",
         "submit_to_kaggle": f"正在提交到 Kaggle: {slug}...",
         "check_submission_status": f"查询 {slug} 的提交状态...",
         "pull_notebook": f"拉取 Notebook: {args.get('kernel_ref', '')}...",
@@ -1351,17 +1439,16 @@ def _print_welcome():
     """Print welcome banner."""
     console.print()
     console.print(Panel(
-        "[bold cyan]🏆 KaggleMate Agent[/]\n\n"
-        "你的 Kaggle 竞赛搭档。用自然语言告诉我你想做什么：\n\n"
-        "• \"帮我研究一下 titanic 比赛\"\n"
-        "• \"生成一个 baseline\"\n"
-        "• \"跑一下训练\"\n"
-        "• \"给点建议\"\n"
-        "• \"融合实验 1 和实验 2\"\n\n"
-        "[bold]Harness 护栏已启用[/] — 提交等危险操作需要人工确认\n"
-        "/harness 查看护栏状态  /audit 查看审计日志\n"
-        "/yesall 批量确认  /noyesall 恢复确认\n\n"
-        "[dim]输入 'exit' 退出 / Type 'exit' to quit[/]",
+        "[bold cyan]🏆 KaggleMate — 你的竞赛导师[/]\n\n"
+        "我不只是工具，更是你的学习伙伴。用自然语言交流：\n\n"
+        "• \"深度调研 orbit-wars，告诉我高分方案用了什么思路\"\n"
+        "• \"帮我讲解这个 Notebook: alexisbcook/titanic-tutorial\"\n"
+        "• \"什么是 target encoding？在这个比赛里怎么用？\"\n"
+        "• \"对比实验 1 和 3，分析为什么分数差这么多\"\n"
+        "• \"帮我研究 titanic，生成 baseline 跑一下\"\n\n"
+        "[bold]每做一步，我都会解释为什么——帮你学习，而不只是执行。[/]\n\n"
+        "Harness 护栏已启用  /harness 查看  /audit 审计\n"
+        "[dim]exit 退出[/]",
         title="欢迎 / Welcome",
         border_style="cyan",
     ))
