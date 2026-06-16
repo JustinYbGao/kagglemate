@@ -39,6 +39,8 @@ SYSTEM_PROMPT = """You are KaggleMate, a Kaggle competition assistant. You help 
 - Blend multiple submissions into ensembles
 - Track experiments in a database
 - Validate submissions before uploading
+- Submit predictions to Kaggle (the user has Kaggle API credentials configured)
+- Check submission status and leaderboard scores
 - Pull public notebooks from Kaggle
 
 ## How to Behave
@@ -255,6 +257,36 @@ TOOLS = [
                     "file_path": {"type": "string", "description": "提交文件路径 / Path to submission CSV"}
                 },
                 "required": ["competition_slug", "file_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "submit_to_kaggle",
+            "description": "提交预测文件到 Kaggle / Submit predictions to Kaggle. ⚠️ IMPORTANT: This consumes a daily submission slot. ONLY call this when the user explicitly asks to submit. Always validate first.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "competition_slug": {"type": "string", "description": "比赛标识 / Competition slug"},
+                    "file_path": {"type": "string", "description": "提交文件路径 / Path to submission CSV"},
+                    "message": {"type": "string", "description": "提交备注 / Submission message"}
+                },
+                "required": ["competition_slug", "file_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_submission_status",
+            "description": "查看比赛提交历史和榜单状态 / Check submission history and leaderboard status for a competition.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "competition_slug": {"type": "string", "description": "比赛标识 / Competition slug"}
+                },
+                "required": ["competition_slug"]
             }
         }
     },
@@ -678,6 +710,85 @@ class ToolExecutor:
 
         return "\n".join(lines)
 
+    def _tool_submit_to_kaggle(self, args: dict) -> str:
+        slug = args["competition_slug"]
+        file_path = args["file_path"]
+        message = args.get("message", "KaggleMate submission")
+
+        # Step 1: Always validate first
+        from kagglemate.tools.submission_validator import validate
+        data_dir = str(config.COMPETITIONS_DIR / slug / "data" / "raw")
+        vr = validate(file_path, data_dir)
+
+        if not vr.is_valid:
+            errors_text = "\n".join(f"- {e}" for e in vr.errors)
+            return f"""## ❌ 无法提交 — 验证未通过
+
+{errors_text}
+
+请修复以上问题后再试。"""
+
+        # Step 2: Verify Kaggle credentials
+        kaggle_json = Path.home() / ".kaggle" / "kaggle.json"
+        if not kaggle_json.exists():
+            return "❌ 未找到 Kaggle API 凭证。请确保 `~/.kaggle/kaggle.json` 存在。"
+
+        # Step 3: Submit
+        from kagglemate.tools.kaggle_cli import KaggleCLI
+        try:
+            result = KaggleCLI.submit(slug, Path(file_path), message)
+        except RuntimeError as e:
+            return f"## ❌ 提交失败\n\n```\n{e}\n```\n\n可能原因: 今日提交次数已用完、文件格式不对、比赛已结束。"
+
+        # Step 4: Try to link to experiment
+        exp_info = ""
+        from kagglemate.memory.experiment_store import ExperimentStore
+        store = ExperimentStore(slug)
+        # Find the experiment that produced this submission
+        exps = store.list_all(limit=5)
+        for e in exps:
+            if e.get("submission_path") == file_path or e.get("submission_path", "").endswith(Path(file_path).name):
+                exp_info = f"\n关联实验: **#{e['id']}** (CV: {e.get('cv_score', 'N/A')})"
+
+        return f"""## ✅ 提交成功！
+
+**比赛**: {slug}
+**文件**: {Path(file_path).name}
+**说明**: {message}{exp_info}
+
+```{result.get('stdout', 'OK')[:300]}```
+
+⚠️ **提醒**:
+- 等待 **4 小时以上** 让分数稳定再判断
+- 早期分数通常虚高
+- 输入 "查看 {slug} 提交状态" 来追踪
+
+需要我帮你记录 LB 分数时，告诉我实验编号和分数。"""
+
+    def _tool_check_submission_status(self, args: dict) -> str:
+        slug = args["competition_slug"]
+        from kagglemate.tools.kaggle_cli import KaggleCLI
+
+        try:
+            subs = KaggleCLI.submissions(slug)
+        except Exception as e:
+            return f"无法获取提交记录: {e}"
+
+        if not subs:
+            return f"比赛 `{slug}` 暂无提交记录。"
+
+        lines = [f"**{slug}** 的提交记录：\n"]
+        lines.append("| 日期 | 说明 | 分数 | 状态 |")
+        lines.append("|---|---|---|---|")
+        for s in subs[:10]:
+            date = (s.get("date", "") or "")[:16]
+            desc = (s.get("description", "") or "")[:30]
+            score = s.get("publicScore", "—") or "pending"
+            status = s.get("status", "?")
+            lines.append(f"| {date} | {desc} | {score} | {status} |")
+
+        return "\n".join(lines)
+
     def _tool_pull_notebook(self, args: dict) -> str:
         kernel_ref = args["kernel_ref"]
         slug = args["competition_slug"]
@@ -857,6 +968,8 @@ def _action_description(tool_name: str, args: dict) -> str:
         "record_lb_score": "记录 LB 分数...",
         "ensemble_blend": "正在融合模型...",
         "validate_submission": "验证提交文件...",
+        "submit_to_kaggle": f"正在提交到 Kaggle: {slug}...",
+        "check_submission_status": f"查询 {slug} 的提交状态...",
         "pull_notebook": f"拉取 Notebook: {args.get('kernel_ref', '')}...",
     }
     return descriptions.get(tool_name, f"调用 {tool_name}...")
