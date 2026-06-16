@@ -18,6 +18,8 @@ Usage:
     python main.py submission validate -c <slug> -f <file>  # Validate file
     python main.py submission submit -c <slug> -f <file>    # Submit (human gate)
     python main.py submission status -c <slug>              # Check submissions
+    python main.py tune <slug> [--trials 50]                # Hyperparameter tuning
+    python main.py ensemble <slug> --ids 1,2,3 [--method weighted_average]
 """
 
 from __future__ import annotations
@@ -1040,6 +1042,152 @@ def submission(
             )
 
         console.print(table)
+
+
+# ── tune: hyperparameter optimization ──
+
+
+@app.command()
+def tune(
+    competition: str = typer.Argument(..., help="Competition slug"),
+    trials: int = typer.Option(50, "--trials", "-n", help="Number of Optuna trials"),
+    run_after: bool = typer.Option(False, "--run", help="Run tuning script after generating"),
+):
+    """Run Optuna hyperparameter tuning for a competition."""
+    from kagglemate.graph.nodes.tune_node import run as tune_run
+    from kagglemate.graph.nodes.init_node import run as init_run
+    from kagglemate.graph.nodes.analyze_node import run as analyze_run
+    from kagglemate.graph.nodes.run_node import run as run_node_fn
+    from kagglemate.graph.state import KaggleAgentState
+    from kagglemate.config import config as cfg
+    from pathlib import Path
+
+    console.print(f"\n[bold cyan]🎯 Hyperparameter Tuning[/]\n")
+    console.print(f"  Competition: [yellow]{competition}[/]")
+    console.print(f"  Trials: [yellow]{trials}[/]")
+
+    comp_dir = cfg.COMPETITIONS_DIR / competition
+    if not comp_dir.exists():
+        console.print(f"[red]No data for '{competition}'. Run 'research' first.[/]")
+        raise typer.Exit(code=1)
+
+    state: KaggleAgentState = {
+        "competition_slug": competition,
+        "competition_name": competition,
+        "data_dir": str(comp_dir / "data" / "raw"),
+        "report_dir": str(comp_dir / "reports"),
+        "script_dir": str(comp_dir / "scripts"),
+        "submission_dir": str(comp_dir / "submissions"),
+        "tune_trials": trials,
+        "messages": [],
+        "current_phase": "build",
+        "errors": [],
+        "best_cv_score": 0.0,
+        "best_lb_score": 0.0,
+        "human_approval_required": False,
+        "human_approved": False,
+    }
+
+    # Run analyze to get data profile
+    analyze_state = analyze_run(state)
+    state.update(analyze_state)
+
+    console.print(f"  Task type: [yellow]{state.get('competition_type')}[/]")
+    console.print(f"  Target: [yellow]{state.get('data_profile', {}).get('target_col', '?')}[/]")
+
+    # Generate tuning script
+    updates = tune_run(state)
+    state.update(updates)
+
+    exp = state.get("current_experiment", {})
+    script_path = exp.get("script_path", "")
+    if script_path:
+        console.print(f"\n[green]✅ Tuning script → {script_path}[/]")
+        console.print(f"  Model: [yellow]{exp.get('model')}[/]")
+        console.print(f"  Trials: [yellow]{trials}[/]")
+
+        if run_after:
+            console.print(f"\n[bold]Running tuning (this may take minutes)...[/]\n")
+            run_state = {**state, "current_experiment": exp}
+            run_updates = run_node_fn(run_state)
+            run_state.update(run_updates)
+
+            cv = run_state.get("current_experiment", {}).get("cv_score", 0.0)
+            if cv > 0:
+                console.print(f"\n[green]✅ Tuning complete! CV: {cv:.5f}[/]")
+        else:
+            console.print(f"\n[bold]Next:[/] python main.py run {competition}")
+    else:
+        console.print("[red]Failed to generate tuning script.[/]")
+
+
+# ── ensemble: blend experiment submissions ──
+
+
+@app.command()
+def ensemble(
+    competition: str = typer.Argument(..., help="Competition slug"),
+    ids: str = typer.Option(..., "--ids", help="Comma-separated experiment IDs, e.g. '1,2,3'"),
+    method: str = typer.Option("weighted_average", "--method", "-m",
+                                help="simple_average | weighted_average | rank_average"),
+):
+    """Blend multiple experiment submissions into one."""
+    from kagglemate.graph.nodes.ensemble_node import run as ensemble_run
+    from kagglemate.graph.state import KaggleAgentState
+    from kagglemate.config import config as cfg
+
+    exp_ids = [int(x.strip()) for x in ids.split(",") if x.strip()]
+    if len(exp_ids) < 2:
+        console.print("[red]Need at least 2 experiment IDs (--ids 1,2,3)[/]")
+        raise typer.Exit(code=1)
+
+    console.print(f"\n[bold cyan]🔀 Ensemble Blending[/]\n")
+    console.print(f"  Competition: [yellow]{competition}[/]")
+    console.print(f"  Experiments: [yellow]{exp_ids}[/]")
+    console.print(f"  Method: [yellow]{method}[/]")
+
+    comp_dir = cfg.COMPETITIONS_DIR / competition
+    state: KaggleAgentState = {
+        "competition_slug": competition,
+        "ensemble_exp_ids": exp_ids,
+        "ensemble_method": method,
+        "submission_dir": str(comp_dir / "submissions"),
+        "data_dir": str(comp_dir / "data" / "raw"),
+        "messages": [],
+        "current_phase": "build",
+        "errors": [],
+        "best_cv_score": 0.0,
+        "best_lb_score": 0.0,
+        "human_approval_required": False,
+        "human_approved": False,
+    }
+
+    updates = ensemble_run(state)
+    state.update(updates)
+
+    errors = state.get("errors", [])
+    exp = state.get("current_experiment", {})
+
+    if errors:
+        console.print(f"\n[red]❌ Ensemble failed:[/]")
+        for e in errors:
+            console.print(f"  {e}")
+    else:
+        console.print(f"\n[bold green]✅ Ensemble complete![/]")
+        console.print(f"  Submission: [cyan]{exp.get('submission_path')}[/]")
+        console.print(f"  Experiment ID: [yellow]#{exp.get('id')}[/]")
+
+        # Validate
+        sub_path = exp.get("submission_path", "")
+        if sub_path:
+            from kagglemate.tools.submission_validator import validate
+            data_dir = str(comp_dir / "data" / "raw")
+            vr = validate(sub_path, data_dir)
+            if vr.is_valid:
+                console.print(f"  Validation: [green]✓ passed[/]")
+                console.print(f"\n[bold]Next:[/] python main.py submission submit -c {competition} -f {sub_path}")
+            else:
+                console.print(f"  Validation: [red]✗ {len(vr.errors)} errors[/]")
 
 
 # ── Entry point ──

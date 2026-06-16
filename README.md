@@ -176,7 +176,7 @@ kagglemate/
 - [x] Phase 3: Evaluate + Suggest (strategy advisor with conditional edges) / 评估+建议
 - [x] Phase 4: Kaggle Kernel Agent (pull/push/monitor with metadata validation) / Kernel Agent
 - [x] Phase 5: Semi-Auto Submit (validator + Human Gate) / 半自动提交
-- [ ] Phase 6: Advanced (Optuna tuning, ensemble, multi-agent, non-tabular data) / 高级功能
+- [x] Phase 6: Advanced (Optuna tuning, ensemble blending) / 高级功能
 
 ## License / 许可证
 

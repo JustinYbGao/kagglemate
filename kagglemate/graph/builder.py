@@ -19,7 +19,7 @@ from kagglemate.graph.state import KaggleAgentState
 from kagglemate.graph.nodes import (
     init_node, analyze_node, research_node, plan_node,
     baseline_node, run_node, evaluate_node, suggest_node,
-    kernel_node, submit_node,
+    kernel_node, submit_node, tune_node, ensemble_node,
 )
 from kagglemate.config import config
 
@@ -78,6 +78,8 @@ def build_full_graph() -> StateGraph:
     builder.add_node("suggest", suggest_node.run)
     builder.add_node("kernel", kernel_node.run)
     builder.add_node("submit", submit_node.run)
+    builder.add_node("tune", tune_node.run)
+    builder.add_node("ensemble", ensemble_node.run)
 
     # ── Edges ──
     builder.set_entry_point("init")

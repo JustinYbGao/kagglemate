@@ -139,5 +139,10 @@ class KaggleAgentState(TypedDict, total=False):
     submission_message: Optional[str]   # message for Kaggle submission
     submission_preview: Optional[str]   # preview text for human approval
 
+    # ── Advanced (Phase 6) ──
+    tune_trials: Optional[int]          # number of Optuna trials (default 50)
+    ensemble_exp_ids: Optional[list[int]]  # experiment IDs to blend
+    ensemble_method: Optional[str]      # "simple_average" | "weighted_average" | "rank_average"
+
     # ── Internal (not part of user-facing state) ──
     _should_continue: Optional[bool]    # conditional edge routing
