@@ -23,8 +23,8 @@ from kagglemate.config import config
 def test_single_tool_call():
     """Test: model calls the right tool with the right arguments."""
     client = OpenAI(
-        api_key=config.DEEPSEEK_API_KEY,
-        base_url=config.DEEPSEEK_BASE_URL,
+        api_key=config.LLM_API_KEY,
+        base_url=config.LLM_BASE_URL,
     )
 
     tools = [
@@ -62,7 +62,7 @@ def test_single_tool_call():
     ]
 
     response = client.chat.completions.create(
-        model=config.DEEPSEEK_MODEL,
+        model=config.LLM_MODEL,
         messages=messages,
         tools=tools,
         tool_choice="auto",
@@ -93,8 +93,8 @@ def test_single_tool_call():
 def test_multi_tool_selection():
     """Test: given multiple tools, model picks the correct one."""
     client = OpenAI(
-        api_key=config.DEEPSEEK_API_KEY,
-        base_url=config.DEEPSEEK_BASE_URL,
+        api_key=config.LLM_API_KEY,
+        base_url=config.LLM_BASE_URL,
     )
 
     tools = [
@@ -165,7 +165,7 @@ def test_multi_tool_selection():
     for test in tests:
         messages = [system_msg, {"role": "user", "content": test["user"]}]
         response = client.chat.completions.create(
-            model=config.DEEPSEEK_MODEL,
+            model=config.LLM_MODEL,
             messages=messages,
             tools=tools,
             tool_choice="auto",
@@ -185,8 +185,8 @@ def test_multi_tool_selection():
 def test_tool_call_with_structured_output():
     """Test: multi-turn — model calls a tool, we simulate the result, model responds."""
     client = OpenAI(
-        api_key=config.DEEPSEEK_API_KEY,
-        base_url=config.DEEPSEEK_BASE_URL,
+        api_key=config.LLM_API_KEY,
+        base_url=config.LLM_BASE_URL,
     )
 
     tools = [
@@ -214,7 +214,7 @@ def test_tool_call_with_structured_output():
 
     # Turn 1: model calls tool
     response = client.chat.completions.create(
-        model=config.DEEPSEEK_MODEL,
+        model=config.LLM_MODEL,
         messages=messages,
         tools=tools,
         tool_choice="auto",
@@ -239,7 +239,7 @@ def test_tool_call_with_structured_output():
 
     # Turn 2: model summarizes
     response2 = client.chat.completions.create(
-        model=config.DEEPSEEK_MODEL,
+        model=config.LLM_MODEL,
         messages=messages,
         extra_body={"thinking": {"type": "disabled"}},  # disable thinking for summary
     )
@@ -255,8 +255,8 @@ def test_tool_call_with_structured_output():
 def test_code_generation():
     """Test: model can generate a simple training script from a prompt."""
     client = OpenAI(
-        api_key=config.DEEPSEEK_API_KEY,
-        base_url=config.DEEPSEEK_BASE_URL,
+        api_key=config.LLM_API_KEY,
+        base_url=config.LLM_BASE_URL,
     )
 
     messages = [
@@ -277,7 +277,7 @@ def test_code_generation():
     ]
 
     response = client.chat.completions.create(
-        model=config.DEEPSEEK_MODEL,
+        model=config.LLM_MODEL,
         messages=messages,
         max_tokens=500,
         extra_body={"thinking": {"type": "disabled"}},  # disable thinking for code gen
@@ -315,15 +315,15 @@ def test_code_generation():
 
 def main():
     print("DeepSeek V4 Pro Tool Calling Verification\n")
-    print(f"  Model: {config.DEEPSEEK_MODEL}")
-    masked = config.DEEPSEEK_API_KEY[:8] + "..." + config.DEEPSEEK_API_KEY[-4:]
+    print(f"  Model: {config.LLM_MODEL}")
+    masked = config.LLM_API_KEY[:8] + "..." + config.LLM_API_KEY[-4:]
     print(f"  Key: {masked}")
-    print(f"  Base URL: {config.DEEPSEEK_BASE_URL}")
+    print(f"  Base URL: {config.LLM_BASE_URL}")
     print()
 
     # Pre-flight: check key is set
-    if not config.DEEPSEEK_API_KEY:
-        print("[FAIL] DEEPSEEK_API_KEY is not set.")
+    if not config.LLM_API_KEY:
+        print("[FAIL] LLM_API_KEY is not set.")
         print("Create a .env file in the project root from .env.example")
         return False
 

@@ -47,15 +47,37 @@ pip install -e ".[ml]"
 
 You need **two** things set up. If either is missing, the health check will tell you. / 你需要配置**两项**。如果缺失，健康检查会提示。
 
-**① DeepSeek API Key**（必需——Agent 的大脑）
+**① LLM API Key**（必需——Agent 的大脑。支持任何 OpenAI 兼容接口）
 
-1. 打开 [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys) 注册/登录
-2. 点击"创建 API Key"，复制密钥（格式：`sk-xxxxxxxx`）
-3. `cp .env.example .env`，编辑 `.env`，填入：
-   ```bash
-   DEEPSEEK_API_KEY=sk-your-actual-key-here
-   ```
-4. 推荐模型：`deepseek-v4-pro`（推理能力强）。预算有限可用 `deepseek-v4-flash`（便宜 3 倍）。
+KaggleMate supports any OpenAI-compatible API. Pick your provider:
+
+```bash
+cp .env.example .env
+# 编辑 .env:
+
+# DeepSeek (默认)
+LLM_PROVIDER=deepseek
+LLM_API_KEY=sk-your-deepseek-key     # https://platform.deepseek.com/api_keys
+
+# 或 OpenAI
+LLM_PROVIDER=openai
+LLM_API_KEY=sk-your-openai-key       # https://platform.openai.com/api-keys
+
+# 或本地 Ollama / vLLM
+LLM_PROVIDER=custom
+LLM_BASE_URL=http://localhost:11434/v1
+LLM_MODEL=qwen3:latest
+LLM_API_KEY=ollama
+```
+
+| Provider / 提供商 | base_url | 默认模型 | 价格 |
+|---|---|---|---|
+| DeepSeek | `api.deepseek.com` | `deepseek-v4-pro` | ~$0.44/百万token |
+| OpenAI | `api.openai.com/v1` | `gpt-4.1` | ~$5/百万token |
+| Ollama (本地) | `localhost:11434/v1` | 你指定的 | 免费 |
+| 自定义 | 任意 | 你指定的 | 取决于提供商 |
+
+> ⚠️ 兼容旧版：如果你之前已经设置了 `DEEPSEEK_API_KEY`，无需修改——会自动检测为 DeepSeek 模式。
 
 **② Kaggle API 凭证**（必需——下载数据、提交比赛）
 

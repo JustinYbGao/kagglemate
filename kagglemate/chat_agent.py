@@ -1104,8 +1104,8 @@ def chat():
     _print_welcome()
 
     client = OpenAI(
-        api_key=config.DEEPSEEK_API_KEY,
-        base_url=config.DEEPSEEK_BASE_URL,
+        api_key=config.LLM_API_KEY,
+        base_url=config.LLM_BASE_URL,
     )
 
     executor = ToolExecutor()
@@ -1163,16 +1163,19 @@ def chat():
 
         messages.append({"role": "user", "content": user_input})
 
-        # Call DeepSeek
+        # Call LLM
         console.print()  # spacing
         try:
-            response = client.chat.completions.create(
-                model=config.DEEPSEEK_MODEL,
+            api_kwargs = dict(
+                model=config.LLM_MODEL,
                 messages=messages,
                 tools=TOOLS,
                 tool_choice="auto",
-                extra_body={"thinking": {"type": "disabled"}},
             )
+            # DeepSeek: disable thinking for reliable tool calling
+            if config.LLM_PROVIDER == "deepseek":
+                api_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+            response = client.chat.completions.create(**api_kwargs)
         except Exception as e:
             console.print(f"[red]API 错误: {e}[/]")
             continue
@@ -1229,13 +1232,12 @@ def chat():
                     "content": result,
                 })
 
-            # Get final response from DeepSeek after tool execution
+            # Get final response from LLM after tool execution
             try:
-                final_response = client.chat.completions.create(
-                    model=config.DEEPSEEK_MODEL,
-                    messages=messages,
-                    extra_body={"thinking": {"type": "disabled"}},
-                )
+                final_kwargs = dict(model=config.LLM_MODEL, messages=messages)
+                if config.LLM_PROVIDER == "deepseek":
+                    final_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+                final_response = client.chat.completions.create(**final_kwargs)
                 final_msg = final_response.choices[0].message
                 reply = final_msg.content or getattr(final_msg, "reasoning_content", None) or ""
                 if reply.strip():

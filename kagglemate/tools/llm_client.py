@@ -1,6 +1,9 @@
-"""LLM client — unified DeepSeek API wrapper.
+"""LLM client — provider-agnostic wrapper.
 
-Handles model selection (Pro vs Flash), thinking mode toggling,
+Supports any OpenAI-compatible API: DeepSeek, OpenAI, Anthropic (via proxy),
+Ollama, vLLM, Groq, etc. Just set LLM_PROVIDER in .env.
+
+Handles model selection (main vs flash), thinking mode (provider-specific),
 and transforms between LangChain's ChatOpenAI and raw OpenAI client.
 """
 
@@ -12,48 +15,70 @@ from openai import OpenAI
 from kagglemate.config import config
 
 
+def _is_deepseek() -> bool:
+    return config.LLM_PROVIDER == "deepseek"
+
+
 def get_llm(use_flash: bool = False) -> ChatOpenAI:
-    """Get a LangChain-compatible ChatOpenAI instance pointing at DeepSeek.
+    """Get a LangChain-compatible ChatOpenAI instance.
 
     Args:
-        use_flash: If True, use deepseek-v4-flash (cheaper, faster).
-                   Defaults to deepseek-v4-pro.
+        use_flash: If True, use the cheaper/faster model (e.g. V4 Flash, GPT-4.1-mini).
+                   Defaults to the main model.
     """
-    model = config.DEEPSEEK_FLASH_MODEL if use_flash else config.DEEPSEEK_MODEL
+    model = config.LLM_FLASH_MODEL if use_flash else config.LLM_MODEL
 
-    return ChatOpenAI(
+    kwargs = dict(
         model=model,
-        api_key=config.DEEPSEEK_API_KEY,
-        base_url=config.DEEPSEEK_BASE_URL,
+        api_key=config.LLM_API_KEY,
+        base_url=config.LLM_BASE_URL,
         temperature=0.0,
         max_tokens=4096,
         timeout=120,
         max_retries=2,
     )
 
+    # DeepSeek: disable thinking by default for tool calling
+    if _is_deepseek():
+        kwargs["model_kwargs"] = {"extra_body": {"thinking": {"type": "disabled"}}}
+
+    return ChatOpenAI(**kwargs)
+
 
 def get_llm_with_thinking() -> ChatOpenAI:
-    """Get a LangChain LLM with thinking enabled (better for code/math).
+    """Get an LLM with extended reasoning (provider-specific).
 
-    Uses deepseek-v4-pro with the thinking reasoning block.
+    Only DeepSeek supports a native thinking mode.
+    For other providers, this returns the standard llm.
     """
+    if _is_deepseek():
+        return ChatOpenAI(
+            model=config.LLM_MODEL,
+            api_key=config.LLM_API_KEY,
+            base_url=config.LLM_BASE_URL,
+            temperature=0.0,
+            max_tokens=8192,
+            timeout=180,
+            max_retries=2,
+            model_kwargs={"extra_body": {"thinking": {"type": "enabled"}}},
+        )
+    # Other providers: just use the standard llm with higher max_tokens
     return ChatOpenAI(
-        model=config.DEEPSEEK_MODEL,
-        api_key=config.DEEPSEEK_API_KEY,
-        base_url=config.DEEPSEEK_BASE_URL,
+        model=config.LLM_MODEL,
+        api_key=config.LLM_API_KEY,
+        base_url=config.LLM_BASE_URL,
         temperature=0.0,
         max_tokens=8192,
         timeout=180,
         max_retries=2,
-        model_kwargs={"extra_body": {"thinking": {"type": "enabled"}}},
     )
 
 
 def get_raw_client() -> OpenAI:
-    """Get the raw OpenAI client for fine-grained control over tool calls."""
+    """Get the raw OpenAI client for fine-grained control."""
     return OpenAI(
-        api_key=config.DEEPSEEK_API_KEY,
-        base_url=config.DEEPSEEK_BASE_URL,
+        api_key=config.LLM_API_KEY,
+        base_url=config.LLM_BASE_URL,
         timeout=180,
     )
 
@@ -64,14 +89,18 @@ def simple_prompt(prompt: str, use_flash: bool = False) -> str:
     The simplest possible LLM call — for when you just need text back.
     """
     client = get_raw_client()
+    model = config.LLM_FLASH_MODEL if use_flash else config.LLM_MODEL
+
+    extra_body = {}
+    if _is_deepseek():
+        extra_body = {"thinking": {"type": "disabled"}}
+
     response = client.chat.completions.create(
-        model=config.DEEPSEEK_FLASH_MODEL if use_flash else config.DEEPSEEK_MODEL,
-        messages=[
-            {"role": "user", "content": prompt},
-        ],
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
         temperature=0.0,
         max_tokens=4096,
-        extra_body={"thinking": {"type": "disabled"}},
+        extra_body=extra_body,
     )
     msg = response.choices[0].message
     return msg.content or getattr(msg, "reasoning_content", "") or ""

@@ -73,12 +73,12 @@ def check():
     else:
         console.print(f"  Python {py_ver}  [red]✗ (need 3.10+)[/]")
 
-    # 2. DeepSeek key
-    if config.DEEPSEEK_API_KEY:
-        masked = config.DEEPSEEK_API_KEY[:8] + "..." + config.DEEPSEEK_API_KEY[-4:]
-        console.print(f"  DeepSeek API key: {masked}  [green]✓[/]")
+    # 2. LLM key
+    if config.LLM_API_KEY:
+        masked = config.LLM_API_KEY[:8] + "..." + config.LLM_API_KEY[-4:]
+        console.print(f"  LLM API key ({config.LLM_PROVIDER}): {masked}  [green]✓[/]")
     else:
-        console.print("  DeepSeek API key  [red]✗ (set DEEPSEEK_API_KEY in .env)[/]")
+        console.print(f"  LLM API key  [red]✗ (set LLM_API_KEY in .env)[/]")
 
     # 3. Kaggle CLI
     import subprocess
@@ -217,7 +217,7 @@ def research(competition: str = typer.Argument(..., help="Competition slug, e.g.
 
     console.print(f"\n[bold cyan]🔬 KaggleMate Research Pipeline[/]\n")
     console.print(f"  Competition: [yellow]{competition}[/]")
-    console.print(f"  Model: [dim]{config.DEEPSEEK_MODEL}[/]")
+    console.print(f"  Model: [dim]{config.LLM_MODEL} ({config.LLM_PROVIDER})[/]")
 
     # Pre-check: does the competition exist?
     try:
