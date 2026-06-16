@@ -33,19 +33,78 @@ Agent: CV 0.8473，实验 #1 已保存。建议: 加正则化、做特征工程.
 
 ## Quick Start / 快速开始
 
+### Step 1: Clone & Install / 克隆并安装
+
 ```bash
-# 1. Clone & install / 克隆并安装
 git clone https://github.com/JustinYbGao/kagglemate.git
 cd kagglemate
+python3.10 -m venv .venv          # Python 3.10+ required / 需要 Python 3.10+
+source .venv/bin/activate
 pip install -e ".[ml]"
+```
 
-# 2. Configure / 配置
-cp .env.example .env
-# 编辑 .env，填入 DEEPSEEK_API_KEY
+### Step 2: Get your API keys / 获取 API 密钥
 
-# 3. Start the agent / 启动对话
+You need **two** things set up. If either is missing, the health check will tell you. / 你需要配置**两项**。如果缺失，健康检查会提示。
+
+**① DeepSeek API Key**（必需——Agent 的大脑）
+
+1. 打开 [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys) 注册/登录
+2. 点击"创建 API Key"，复制密钥（格式：`sk-xxxxxxxx`）
+3. `cp .env.example .env`，编辑 `.env`，填入：
+   ```bash
+   DEEPSEEK_API_KEY=sk-your-actual-key-here
+   ```
+4. 推荐模型：`deepseek-v4-pro`（推理能力强）。预算有限可用 `deepseek-v4-flash`（便宜 3 倍）。
+
+**② Kaggle API 凭证**（必需——下载数据、提交比赛）
+
+1. 打开 [kaggle.com/settings/account](https://www.kaggle.com/settings/account)
+2. 滚动到 "API" 部分 → 点击 "Create New Token" → 下载 `kaggle.json`
+3. 将 `kaggle.json` 放到 `~/.kaggle/` 目录：
+   ```bash
+   mkdir -p ~/.kaggle
+   mv ~/Downloads/kaggle.json ~/.kaggle/
+   chmod 600 ~/.kaggle/kaggle.json    # 防止其他用户读取 / protect your key
+   ```
+4. 或者在 `.env` 中直接设置（不推荐，但可用）：
+   ```bash
+   KAGGLE_USERNAME=your-kaggle-username
+   KAGGLE_KEY=your-kaggle-api-key
+   ```
+
+> ⚠️ GitHub 不会包含你的 API 密钥。`.env` 和 `~/.kaggle/kaggle.json` 都不会被提交。
+
+### Step 3: Verify / 验证安装
+
+```bash
+python main.py check
+```
+
+你应该看到全绿 / You should see all green ✓：
+
+```
+KaggleMate Health Check
+  Python 3.12.13  ✓
+  DeepSeek API key  ✓
+  Kaggle CLI  ✓
+  Kaggle credentials  ✓
+  Active competitions: 20+  ✓
+```
+
+### Step 4: Start the agent / 启动对话
+
+```bash
 python main.py
-# 或: source ~/.zshrc && km
+```
+
+或者设置快捷别名（可选）：
+
+```bash
+# 加到 ~/.zshrc
+echo 'km() { cd /path/to/kagglemate && source .venv/bin/activate && python main.py chat "$@"; }' >> ~/.zshrc
+source ~/.zshrc
+km
 ```
 
 ---
@@ -312,6 +371,37 @@ kagglemate/
 - [x] Phase 6d: Competition Registry (7 types, auto-detect, capability gate) / 比赛类型注册表
 - [x] Phase 6e: Deep Research (Kaggle + arXiv + Web synthesis) / 深度调研
 - [ ] Image/Text baseline support / 图像/文本 baseline
+
+---
+
+## Prerequisites / 环境要求
+
+| Requirement / 需求 | 说明 |
+|---|---|
+| **Python 3.10+** | [python.org](https://python.org) 或 `brew install python@3.12` |
+| **DeepSeek API Key** | [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys) — 免费注册，按量付费（V4 Pro $0.44/百万token） |
+| **Kaggle API 凭证** | [kaggle.com/settings/account](https://www.kaggle.com/settings/account) → Create New Token → 放到 `~/.kaggle/kaggle.json` |
+| **已接受的比赛规则** | 如果你要下载某个比赛的数据，需要先在网页上点击 "Join Competition" 接受规则 |
+
+### Optional Dependencies / 可选依赖
+
+```bash
+pip install -e ".[ml]"      # LightGBM + XGBoost + CatBoost（Tabular baseline 必需）
+pip install -e ".[tune]"    # Optuna 超参数优化
+pip install -e ".[dev]"     # pytest 测试框架
+```
+
+## Troubleshooting / 常见问题
+
+| Problem / 问题 | Cause / 原因 | Solution / 解决 |
+|---|---|---|
+| `ModuleNotFoundError: kaggle` | Kaggle CLI 未安装 | `pip install kaggle` |
+| `kaggle.json not found` | 未配置 Kaggle API | 去 [kaggle.com/settings/account](https://www.kaggle.com/settings/account) → Create New Token |
+| `403 Forbidden` when downloading | 未接受比赛规则 | 在 Kaggle 网页上点击该比赛的 "Join Competition" |
+| `DEEPSEEK_API_KEY not set` | `.env` 未配置 | `cp .env.example .env`，填入真实 key |
+| arXiv 搜索无结果 / timeout | 国内网络限制 arXiv API | 正常现象——Deep Research 自动跳过，Kaggle+Web 结果仍可用 |
+| `name 'Panel' is not defined` | Rich 库版本问题 | `pip install --upgrade rich` |
+| Baseline 脚本语法错误 | LLM 生成代码偶有瑕疵 | 重新运行 `python main.py baseline`，或手动微调脚本 |
 
 ---
 
