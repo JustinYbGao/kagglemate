@@ -46,6 +46,7 @@ SYSTEM_PROMPT_TEMPLATE = """You are KaggleMate, a Kaggle competition assistant. 
 - Validate submissions before uploading
 - Submit predictions to Kaggle (the user has Kaggle API credentials configured)
 - Check submission status and leaderboard scores
+- Read generated reports (SPEC.md, data_profile.md, etc.) with the read_generated_file tool
 - Pull public notebooks from Kaggle
 
 ## How to Behave
@@ -63,7 +64,14 @@ The user is working on competitions. The most common workflow is:
 Guide the user through this flow naturally.
 
 ## IMPORTANT: Finding user's competitions
-When the user asks "what competitions am I in?" or "我的比赛", you MUST call list_competitions with group="entered". This returns exactly the competitions the user has joined. Do NOT list all competitions or guess — use the tool."""
+When the user asks "what competitions am I in?" or "我的比赛", you MUST call list_competitions with group="entered". This returns exactly the competitions the user has joined. Do NOT list all competitions or guess — use the tool.
+
+## CRITICAL: Tool Calling Rules
+- ONLY use the tools listed above. You have 16 tools. Use them.
+- NEVER output raw XML, HTML, or tool-call-like tags (like <invoke> or <tool_call>). Use the function calling system.
+- NEVER pretend to call a tool that doesn't exist. If you need to read a file, use read_generated_file.
+- After research_competition completes, USE read_generated_file to read SPEC.md or data_profile.md for details before responding.
+- If the competition is NOT tabular CSV (e.g. JSON files, images, audio), explain this to the user. Don't pretend LightGBM can solve it."""
 
 # ── Tool Definitions ──
 
@@ -325,6 +333,25 @@ TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_generated_file",
+            "description": "读取 KaggleMate 生成的报告文件。可读 SPEC.md、data_profile.md、research_summary.md、rules_checklist.md、next_steps.md 等。/ Read a generated report file. Use this when you need to see the details of research results before responding to the user.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "competition_slug": {"type": "string", "description": "比赛标识 / Competition slug"},
+                    "filename": {
+                        "type": "string",
+                        "description": "文件名: SPEC.md, data_profile.md, research_summary.md, rules_checklist.md, next_steps.md",
+                        "enum": ["SPEC.md", "data_profile.md", "research_summary.md", "rules_checklist.md", "next_steps.md"]
+                    }
+                },
+                "required": ["competition_slug", "filename"]
+            }
+        }
+    },
 ]
 
 # ── Tool Implementation ──
@@ -414,25 +441,42 @@ class ToolExecutor:
         if state.get("errors"):
             return f"下载失败: {state['errors'][0]}"
 
-        # Analyze: profile data
+        # ── Phase 0: Detect competition type from files ──
+        data_dir = Path(state.get("data_dir", ""))
+        file_list = list(data_dir.rglob("*")) if data_dir.exists() else []
+        file_names = [f.name for f in file_list if f.is_file()]
+        file_extensions = set(f.suffix.lower() for f in file_list if f.is_file() and f.suffix)
+
+        csv_count = sum(1 for n in file_names if n.endswith('.csv'))
+        json_count = sum(1 for n in file_names if n.endswith('.json'))
+        parquet_count = sum(1 for n in file_names if n.endswith('.parquet'))
+        img_count = sum(1 for n in file_names if any(n.lower().endswith(e) for e in ['.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp']))
+        audio_count = sum(1 for n in file_names if any(n.lower().endswith(e) for e in ['.wav', '.mp3', '.ogg', '.flac']))
+
+        # ── Analyze: profile data ──
         console.print("  [dim]⏳ 分析数据中...[/]")
         state.update(analyze_run(state))
 
-        # Research: find notebooks
+        # ── Research: find notebooks ──
         console.print("  [dim]⏳ 调研公开 Notebook 中...[/]")
         state.update(research_run(state))
 
-        # Plan: generate SPEC
+        # ── Plan: generate SPEC ──
         console.print("  [dim]⏳ 生成策略文档中...[/]")
         state.update(plan_run(state))
 
-        ctype = state.get("competition_type", "?")
-        metric = state.get("evaluation_metric", "?")
         profile = state.get("data_profile") or {}
-        n_nb = len(state.get("notebook_summaries", []))
-        report_dir = state.get("report_dir", "")
+        needs_csv = csv_count > 0
+        is_tabular = needs_csv and profile.get("train_rows", 0) > 0
 
-        summary = f"""## 调研完成 — {slug}
+        # ── Build summary based on what we found ──
+        if is_tabular:
+            # Standard tabular competition — show full profile
+            ctype = state.get("competition_type", "?")
+            metric = state.get("evaluation_metric", "?")
+            n_nb = len(state.get("notebook_summaries", []))
+
+            summary = f"""## 调研完成 — {slug}
 
 **任务类型**: {ctype}
 **评价指标**: {metric}
@@ -448,8 +492,67 @@ class ToolExecutor:
 
 **下一步**: 输入 "生成 baseline" 来创建第一个模型。"""
 
-        if n_nb == 0:
-            summary += "\n\n⚠️ 该比赛暂无公开 Notebook（可能是新比赛），策略文档基于数据特征生成。"
+            if n_nb == 0:
+                summary += "\n\n⚠️ 该比赛暂无公开 Notebook（可能是新比赛）。"
+
+        else:
+            # Non-tabular competition — explain what we found
+            file_summary_parts = []
+            if json_count > 0:
+                file_summary_parts.append(f"{json_count} 个 JSON 文件")
+            if parquet_count > 0:
+                file_summary_parts.append(f"{parquet_count} 个 Parquet 文件")
+            if img_count > 0:
+                file_summary_parts.append(f"图片文件 ({img_count} 个)")
+            if audio_count > 0:
+                file_summary_parts.append(f"音频文件 ({audio_count} 个)")
+            if csv_count > 0:
+                file_summary_parts.append(f"{csv_count} 个 CSV 文件")
+
+            # Try to guess competition type
+            if json_count > 0 and csv_count == 0:
+                guess = "可能是 **代码竞赛 (Code Competition)** 或 **强化学习/优化类比赛**，数据以 JSON 格式提供，需要编写代码处理。"
+            elif img_count > 3 or audio_count > 3:
+                guess = "可能是 **计算机视觉/音频 深度学习** 竞赛。"
+            elif parquet_count > 0:
+                guess = "数据使用 Parquet 格式，可能是大规模表格竞赛。"
+            else:
+                guess = "比赛数据格式非标准 CSV，需要进一步分析。"
+
+            # Sample a JSON file if available
+            json_sample = ""
+            if json_count > 0:
+                json_files = sorted([f for f in file_list if f.suffix == '.json' and f.is_file()])
+                if json_files:
+                    try:
+                        import json as _json
+                        sample = _json.loads(json_files[0].read_text())
+                        keys = list(sample.keys()) if isinstance(sample, dict) else f"list of {len(sample)} items"
+                        json_sample = f"\n\n**示例 JSON 结构** (`{json_files[0].name}`):\n```\n键: {keys}\n```"
+                    except Exception:
+                        pass
+
+            summary = f"""## 调研完成 — {slug}
+
+⚠️ **这不是标准 Tabular CSV 比赛。**
+
+**数据格式**: {', '.join(file_summary_parts) if file_summary_parts else '未知格式'}
+**文件总数**: {len(file_names)} 个{json_sample}
+
+**判断**: {guess}
+
+**我目前的能力**:
+- ✅ Tabular CSV 分类/回归：可以自动生成 baseline、调参、集成
+- ⚠️ JSON/代码竞赛：无法自动生成模型，但可以帮你分析数据结构、拉取公开 Notebook 参考
+- ❌ 图像/音频：暂不支持自动建模
+
+已生成文件（通用部分）：
+- `SPEC.md` — 比赛策略文档
+- `rules_checklist.md` — 规则检查清单
+
+**下一步**: 输入 "查看 SPEC.md" 来阅读生成的策略文档。或者告诉我你想怎么处理这个比赛。"""
+            if json_count > 0:
+                summary += "\n\n💡 这类比赛通常需要用 Python 解析 JSON、实现算法逻辑。我可以帮你分析数据结构和研究公开方案。"
 
         return summary
 
@@ -840,6 +943,17 @@ class ToolExecutor:
 
         return "\n".join(lines)
 
+    def _tool_read_generated_file(self, args: dict) -> str:
+        slug = args["competition_slug"]
+        filename = args["filename"]
+        path = config.COMPETITIONS_DIR / slug / "reports" / filename
+        if not path.exists():
+            return f"文件 `{filename}` 尚未生成。请先运行 research。"
+        content = path.read_text(encoding="utf-8")
+        if len(content) > 5000:
+            content = content[:5000] + f"\n\n...(文件共 {len(content)} 字符，已截断前 5000 字符)"
+        return content
+
     def _tool_pull_notebook(self, args: dict) -> str:
         kernel_ref = args["kernel_ref"]
         slug = args["competition_slug"]
@@ -1038,6 +1152,7 @@ def _action_description(tool_name: str, args: dict) -> str:
         "record_lb_score": "记录 LB 分数...",
         "ensemble_blend": "正在融合模型...",
         "validate_submission": "验证提交文件...",
+        "read_generated_file": "读取生成的文件...",
         "submit_to_kaggle": f"正在提交到 Kaggle: {slug}...",
         "check_submission_status": f"查询 {slug} 的提交状态...",
         "pull_notebook": f"拉取 Notebook: {args.get('kernel_ref', '')}...",
