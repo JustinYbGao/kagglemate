@@ -1212,6 +1212,42 @@ def ensemble(
                 console.print(f"  Validation: [red]✗ {len(vr.errors)} errors[/]")
 
 
+# ── types: show competition type registry ──
+
+
+@app.command()
+def types():
+    """Show all competition types and what the agent can do for each."""
+    from kagglemate.competition_registry import COMPETITION_TYPES
+    from rich.table import Table
+
+    table = Table(title="Competition Types / 比赛类型注册表")
+    table.add_column("Type / 类型", style="cyan")
+    table.add_column("Detection / 检测")
+    table.add_column("Baseline")
+    table.add_column("Tune / 调参")
+    table.add_column("Ensemble / 集成")
+    table.add_column("Submit / 提交")
+    table.add_column("Research / 调研")
+
+    for type_id, ct in COMPETITION_TYPES.items():
+        detection = ", ".join(ct.detection_extensions[:3])
+        if not detection:
+            detection = "(手动)"
+        table.add_row(
+            f"{ct.name_zh}\n[dim]{type_id}[/]",
+            detection,
+            "✅" if ct.can_baseline else "—",
+            "✅" if ct.can_tune else "—",
+            "✅" if ct.can_ensemble else "—",
+            "✅" if ct.can_submit else "—",
+            "✅" if ct.can_research else "—",
+        )
+
+    console.print(table)
+    console.print(f"\n[dim]要添加新类型: 编辑 kagglemate/competition_registry.py 中的 COMPETITION_TYPES 字典。[/]")
+
+
 # ── harness: view safety harness status / audit log ──
 
 

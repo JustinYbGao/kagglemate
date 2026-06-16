@@ -47,6 +47,7 @@ SYSTEM_PROMPT_TEMPLATE = """You are KaggleMate, a Kaggle competition assistant. 
 - Validate submissions before uploading
 - Submit predictions to Kaggle (the user has Kaggle API credentials configured)
 - Check submission status and leaderboard scores
+- Check what you can/cannot do for a competition type (use the what_can_i_do tool)
 - Read generated reports (SPEC.md, data_profile.md, etc.) with the read_generated_file tool
 - Pull public notebooks from Kaggle
 
@@ -337,6 +338,20 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "what_can_i_do",
+            "description": "查询当前比赛 Agent 能做什么、不能做什么。在开始使用一个新比赛时调用，了解 Agent 的能力边界。/ Check what the agent can and cannot do for the current competition.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "competition_slug": {"type": "string", "description": "比赛标识 / Competition slug"}
+                },
+                "required": ["competition_slug"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "read_generated_file",
             "description": "读取 KaggleMate 生成的报告文件。可读 SPEC.md、data_profile.md、research_summary.md、rules_checklist.md、next_steps.md 等。/ Read a generated report file. Use this when you need to see the details of research results before responding to the user.",
             "parameters": {
@@ -443,18 +458,13 @@ class ToolExecutor:
             return f"下载失败: {state['errors'][0]}"
 
         # ── Phase 0: Detect competition type from files ──
-        data_dir = Path(state.get("data_dir", ""))
-        file_list = list(data_dir.rglob("*")) if data_dir.exists() else []
-        file_names = [f.name for f in file_list if f.is_file()]
-        file_extensions = set(f.suffix.lower() for f in file_list if f.is_file() and f.suffix)
+        from kagglemate.competition_registry import detect_competition_type, get_competition_gate, get_type_summary
 
-        csv_count = sum(1 for n in file_names if n.endswith('.csv'))
-        json_count = sum(1 for n in file_names if n.endswith('.json'))
-        parquet_count = sum(1 for n in file_names if n.endswith('.parquet'))
-        img_count = sum(1 for n in file_names if any(n.lower().endswith(e) for e in ['.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp']))
-        audio_count = sum(1 for n in file_names if any(n.lower().endswith(e) for e in ['.wav', '.mp3', '.ogg', '.flac']))
+        comp_type = detect_competition_type(slug)
+        comp_gate = get_competition_gate()
+        comp_gate.set_competition_type(slug, comp_type)
 
-        # ── Analyze: profile data ──
+        # ── Analyze: profile data (tabular only) ──
         console.print("  [dim]⏳ 分析数据中...[/]")
         state.update(analyze_run(state))
 
@@ -467,18 +477,17 @@ class ToolExecutor:
         state.update(plan_run(state))
 
         profile = state.get("data_profile") or {}
-        needs_csv = csv_count > 0
-        is_tabular = needs_csv and profile.get("train_rows", 0) > 0
+        n_nb = len(state.get("notebook_summaries", []))
+        is_tabular = comp_type.type_id == "tabular" and profile.get("train_rows", 0) > 0
 
-        # ── Build summary based on what we found ──
+        # ── Build type-aware summary ──
         if is_tabular:
-            # Standard tabular competition — show full profile
             ctype = state.get("competition_type", "?")
             metric = state.get("evaluation_metric", "?")
-            n_nb = len(state.get("notebook_summaries", []))
 
             summary = f"""## 调研完成 — {slug}
 
+**比赛类型**: {comp_type.name_zh}
 **任务类型**: {ctype}
 **评价指标**: {metric}
 **训练集**: {profile.get('train_rows', '?')} 行 × {len(profile.get('columns', []))} 列
@@ -491,69 +500,31 @@ class ToolExecutor:
 - `data_profile.md` — 数据分析报告
 - `rules_checklist.md` — 规则检查清单
 
+{get_type_summary(comp_type)}
+
 **下一步**: 输入 "生成 baseline" 来创建第一个模型。"""
 
             if n_nb == 0:
                 summary += "\n\n⚠️ 该比赛暂无公开 Notebook（可能是新比赛）。"
 
         else:
-            # Non-tabular competition — explain what we found
-            file_summary_parts = []
-            if json_count > 0:
-                file_summary_parts.append(f"{json_count} 个 JSON 文件")
-            if parquet_count > 0:
-                file_summary_parts.append(f"{parquet_count} 个 Parquet 文件")
-            if img_count > 0:
-                file_summary_parts.append(f"图片文件 ({img_count} 个)")
-            if audio_count > 0:
-                file_summary_parts.append(f"音频文件 ({audio_count} 个)")
-            if csv_count > 0:
-                file_summary_parts.append(f"{csv_count} 个 CSV 文件")
-
-            # Try to guess competition type
-            if json_count > 0 and csv_count == 0:
-                guess = "可能是 **代码竞赛 (Code Competition)** 或 **强化学习/优化类比赛**，数据以 JSON 格式提供，需要编写代码处理。"
-            elif img_count > 3 or audio_count > 3:
-                guess = "可能是 **计算机视觉/音频 深度学习** 竞赛。"
-            elif parquet_count > 0:
-                guess = "数据使用 Parquet 格式，可能是大规模表格竞赛。"
-            else:
-                guess = "比赛数据格式非标准 CSV，需要进一步分析。"
-
-            # Sample a JSON file if available
-            json_sample = ""
-            if json_count > 0:
-                json_files = sorted([f for f in file_list if f.suffix == '.json' and f.is_file()])
-                if json_files:
-                    try:
-                        import json as _json
-                        sample = _json.loads(json_files[0].read_text())
-                        keys = list(sample.keys()) if isinstance(sample, dict) else f"list of {len(sample)} items"
-                        json_sample = f"\n\n**示例 JSON 结构** (`{json_files[0].name}`):\n```\n键: {keys}\n```"
-                    except Exception:
-                        pass
+            # Non-tabular — use registry for consistent type info
+            # Sample data for insight
+            data_dir = Path(state.get("data_dir", ""))
+            sample_info = _sample_data(data_dir, comp_type)
 
             summary = f"""## 调研完成 — {slug}
 
-⚠️ **这不是标准 Tabular CSV 比赛。**
+**比赛类型**: {comp_type.name_zh} / {comp_type.name_en}
 
-**数据格式**: {', '.join(file_summary_parts) if file_summary_parts else '未知格式'}
-**文件总数**: {len(file_names)} 个{json_sample}
+{get_type_summary(comp_type)}{sample_info}
 
-**判断**: {guess}
-
-**我目前的能力**:
-- ✅ Tabular CSV 分类/回归：可以自动生成 baseline、调参、集成
-- ⚠️ JSON/代码竞赛：无法自动生成模型，但可以帮你分析数据结构、拉取公开 Notebook 参考
-- ❌ 图像/音频：暂不支持自动建模
-
-已生成文件（通用部分）：
+已生成文件：
 - `SPEC.md` — 比赛策略文档
 - `rules_checklist.md` — 规则检查清单
+**公开 Notebook**: {n_nb} 个
 
-**下一步**: 输入 "查看 SPEC.md" 来阅读生成的策略文档。或者告诉我你想怎么处理这个比赛。"""
-            if json_count > 0:
-                summary += "\n\n💡 这类比赛通常需要用 Python 解析 JSON、实现算法逻辑。我可以帮你分析数据结构和研究公开方案。"
+**下一步**: 输入 "查看 SPEC.md" 来阅读策略文档。或者告诉我你想怎么处理这个比赛。"""
 
         return summary
 
@@ -944,6 +915,13 @@ class ToolExecutor:
 
         return "\n".join(lines)
 
+    def _tool_what_can_i_do(self, args: dict) -> str:
+        slug = args["competition_slug"]
+        from kagglemate.competition_registry import detect_competition_type, get_competition_gate, get_type_summary
+        comp_gate = get_competition_gate()
+        comp_type = comp_gate.get_competition_type(slug)
+        return get_type_summary(comp_type)
+
     def _tool_read_generated_file(self, args: dict) -> str:
         slug = args["competition_slug"]
         filename = args["filename"]
@@ -977,6 +955,43 @@ class ToolExecutor:
 
 
 # ── Helpers ──
+
+
+def _sample_data(data_dir: Path, comp_type: any) -> str:
+    """Sample data files for non-tabular competitions. Returns a formatted string."""
+    from kagglemate.competition_registry import CompetitionType
+    files = list(data_dir.rglob("*")) if data_dir.exists() else []
+    files = [f for f in files if f.is_file()]
+
+    if not files:
+        return ""
+
+    parts = []
+    # Sample JSON
+    json_files = sorted([f for f in files if f.suffix == '.json'])
+    if json_files:
+        try:
+            import json as _json
+            sample = _json.loads(json_files[0].read_text())
+            keys = list(sample.keys()) if isinstance(sample, dict) else f"list of {len(sample)} items"
+            parts.append(f"\n**示例 JSON 结构** (`{json_files[0].name}`):\n```\n键: {keys}\n```")
+        except Exception:
+            parts.append(f"\n**文件示例**: `{json_files[0].name}` ({json_files[0].stat().st_size//1024} KB)")
+
+    # Sample Python
+    py_files = sorted([f for f in files if f.suffix == '.py'])
+    if py_files:
+        parts.append(f"\n**Python 文件** ({len(py_files)} 个): {', '.join(f.name for f in py_files[:5])}")
+
+    # File summary
+    ext_summary = {}
+    for f in files:
+        ext = f.suffix.lower() or '(no ext)'
+        ext_summary[ext] = ext_summary.get(ext, 0) + 1
+    ext_list = ", ".join(f"{v} 个 {k}" for k, v in sorted(ext_summary.items(), key=lambda x: -x[1]))
+    parts.insert(0, f"\n**数据总览**: {len(files)} 个文件 ({ext_list})")
+
+    return "\n".join(parts)
 
 
 def _base_state(slug: str) -> KaggleAgentState:
@@ -1039,11 +1054,18 @@ def chat():
 
     # ── Initialize Harness (safety layer) / 初始化安全护栏 ──
     from kagglemate.harness import Harness
+    from kagglemate.competition_registry import get_competition_gate, CompetitionGate
+
     harness = Harness(executor, io_handler=input)
 
+    # Wire CompetitionGate as a Harness pre-hook
+    # This ensures the LLM CANNOT call tools that don't apply to the current competition type
+    comp_gate = get_competition_gate()
+    harness.add_pre_hook(comp_gate.check)
+
     # Show harness status on startup
-    console.print(f"  [dim]护栏状态: 确认门控={harness.confirmation_required}, "
-                  f"审计日志={harness.audit.count()}条[/]")
+    console.print(f"  [dim]护栏: 确认门控={harness.confirmation_required}, "
+                  f"类型门控=✓, 审计={harness.audit.count()}条[/]")
 
     while True:
         try:
@@ -1074,6 +1096,9 @@ def chat():
         if user_input.strip().lower() in ("/noyesall", "/noyes"):
             harness.confirmation_gate.super_confirm_mode = False
             console.print("[green]✅ 超级确认模式已关闭[/]")
+            continue
+        if user_input.strip().lower() in ("/types", "/competition"):
+            _show_competition_types(comp_gate)
             continue
 
         messages.append({"role": "user", "content": user_input})
@@ -1185,6 +1210,7 @@ def _action_description(tool_name: str, args: dict) -> str:
         "ensemble_blend": "正在融合模型...",
         "validate_submission": "验证提交文件...",
         "read_generated_file": "读取生成的文件...",
+        "what_can_i_do": "查询能力边界...",
         "submit_to_kaggle": f"正在提交到 Kaggle: {slug}...",
         "check_submission_status": f"查询 {slug} 的提交状态...",
         "pull_notebook": f"拉取 Notebook: {args.get('kernel_ref', '')}...",
@@ -1228,6 +1254,34 @@ def _show_audit_trail(harness):
         )
 
     console.print(table)
+
+
+def _show_competition_types(comp_gate):
+    """Display all known competition types and their capabilities."""
+    from kagglemate.competition_registry import COMPETITION_TYPES
+    from rich.table import Table
+
+    table = Table(title="Competition Types / 比赛类型")
+    table.add_column("Type", style="cyan")
+    table.add_column("Baseline")
+    table.add_column("Tune")
+    table.add_column("Ensemble")
+    table.add_column("Research")
+    table.add_column("Submit")
+
+    for type_id, ct in COMPETITION_TYPES.items():
+        table.add_row(
+            f"{ct.name_zh}\n[dim]{type_id}[/]",
+            "✅" if ct.can_baseline else "—",
+            "✅" if ct.can_tune else "—",
+            "✅" if ct.can_ensemble else "—",
+            "✅" if ct.can_research else "—",
+            "✅" if ct.can_submit else "—",
+        )
+
+    console.print(table)
+    if comp_gate:
+        console.print(Panel(comp_gate.status(), title="检测到的比赛", border_style="blue"))
 
 
 def _print_welcome():
