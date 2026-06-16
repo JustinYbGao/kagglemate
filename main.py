@@ -108,33 +108,45 @@ def check():
 
 
 @app.command()
-def list_competitions(search: str = typer.Option("", "--search", "-s", help="Filter by search term")):
-    """List available Kaggle competitions."""
+def list_competitions(search: str = typer.Option("", "--search", "-s", help="Filter by search term"),
+                      category: str = typer.Option("all", "--category", "-c", help="all|featured|research|playground|gettingStarted"),
+                      all: bool = typer.Option(False, "--all", help="Show all including old competitions")):
+    """List active Kaggle competitions (sorted by newest)."""
     try:
-        comps = KaggleCLI.list_competitions(search=search)
+        comps = KaggleCLI.list_competitions(search=search, sort_by="recentlyCreated", page_size=50, category=category)
     except Exception as e:
         console.print(f"[red]Error: {e}[/]")
         raise typer.Exit(code=1)
 
     if not comps:
         console.print("[yellow]No competitions found.[/]")
+        console.print("[dim]Kaggle API 返回有限。直接访问 kaggle.com/competitions 查看完整列表。[/]")
         return
 
-    table = Table(title=f"Kaggle Competitions ({len(comps)})")
-    table.add_column("Ref", style="cyan")
+    active = [c for c in comps if c.get("deadline", "") >= "2025"]
+    old = [c for c in comps if c.get("deadline", "") < "2025"]
+
+    table = Table(title=f"Active Competitions ({len(active)})")
+    table.add_column("Slug", style="cyan")
     table.add_column("Deadline", style="yellow")
     table.add_column("Category")
-    table.add_column("Teams")
+    table.add_column("Reward")
+    table.add_column("Teams", justify="right")
 
-    for c in comps[:30]:
+    for c in active:
+        ref = c.get("ref", "?").split("/")[-1]
         table.add_row(
-            c.get("ref", "?"),
-            c.get("deadline", "?")[:10],
+            ref[:40],
+            (c.get("deadline", "?") or "")[:10],
             c.get("category", "?"),
+            (c.get("reward", "") or "")[:25],
             c.get("teamCount", "?"),
         )
 
     console.print(table)
+
+    if old and all:
+        console.print(f"\n[dim]Older competitions: {len(old)} (use --all to hide)[/]")
 
 
 # ── inspect ──

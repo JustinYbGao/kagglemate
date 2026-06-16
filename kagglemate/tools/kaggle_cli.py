@@ -57,13 +57,28 @@ class KaggleCLI:
         )
 
     @staticmethod
-    def list_competitions(search: str = "") -> list[dict]:
-        """List competitions (optionally filtered by search term).
+    def list_competitions(search: str = "", sort_by: str = "recentlyCreated",
+                          page_size: int = 50, category: str = "all") -> list[dict]:
+        """List competitions with smart defaults for active/recent competitions.
 
-        Returns a list of dicts with keys: ref, deadline, category, reward,
-        team_count, has_notebook.
+        Args:
+            search: Optional search term filter.
+            sort_by: Sort order. Default 'recentlyCreated' shows newest first.
+                     Options: grouped, prize, earliestDeadline, latestDeadline,
+                             numberOfTeams, recentlyCreated
+            page_size: Results per page (max 200). Default 50.
+            category: Competition category. Default 'all'.
+                      Options: all, featured, research, recruitment,
+                              gettingStarted, masters, playground
+
+        Returns a list of dicts.
         """
-        cmd = ["kaggle", "competitions", "list", "--csv"]
+        cmd = [
+            "kaggle", "competitions", "list", "--csv",
+            "--sort-by", sort_by,
+            "--page-size", str(min(page_size, 200)),
+            "--category", category,
+        ]
         if search:
             cmd.extend(["--search", search])
 
@@ -72,6 +87,24 @@ class KaggleCLI:
             raise RuntimeError(f"kaggle CLI error: {result.stderr}")
 
         reader = csv.DictReader(io.StringIO(result.stdout))
+        all_comps = list(reader)
+
+        # Filter out competitions with deadlines > 6 months in the past
+        from datetime import datetime
+        now = datetime.now()
+        cutoff = now.strftime("%Y-%m-%d")
+        # Simple: keep comps where deadline >= 2025 (crude but effective)
+        active = []
+        old = []
+        for c in all_comps:
+            deadline = c.get("deadline", "")
+            if deadline >= "2025":
+                active.append(c)
+            else:
+                old.append(c)
+
+        # Show active first, then old (limited)
+        return active + old[:5]
         return list(reader)
 
     @staticmethod

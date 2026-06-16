@@ -65,13 +65,18 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "list_competitions",
-            "description": "列出当前可参与的 Kaggle 比赛 / List available Kaggle competitions. Use when the user wants to browse or find a competition.",
+            "description": "列出当前活跃的 Kaggle 比赛（按最新发布排序）/ List ACTIVE Kaggle competitions sorted by newest first. Use when the user wants to browse or find a competition to enter.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "search": {
                         "type": "string",
-                        "description": "可选搜索词，如 'titanic', 'playground' / Optional search term"
+                        "description": "搜索词，如 'tabular', 'playground', 'NLP' / Search term"
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "比赛类别: all, featured, research, playground, gettingStarted, recruitment",
+                        "enum": ["all", "featured", "research", "playground", "gettingStarted", "recruitment"]
                     }
                 },
                 "required": []
@@ -331,19 +336,40 @@ class ToolExecutor:
 
     def _tool_list_competitions(self, args: dict) -> str:
         search = args.get("search", "")
-        comps = KaggleCLI.list_competitions(search=search)
+        category = args.get("category", "all")
+
+        comps = KaggleCLI.list_competitions(search=search, category=category, sort_by="recentlyCreated")
 
         if not comps:
-            return "没有找到比赛 / No competitions found."
+            return f"没有找到比赛（搜索: '{search or 'all'}'）。Kaggle API 返回的比赛有限，建议直接访问 kaggle.com/competitions 浏览。"
 
-        lines = [f"找到 {len(comps)} 个比赛："]
-        for c in comps[:15]:
+        # Split into active (2025+) and old
+        active = [c for c in comps if c.get("deadline", "") >= "2025"]
+        old = [c for c in comps if c.get("deadline", "") < "2025"]
+
+        lines = [f"## 活跃比赛 ({len(active)} 个)  / Active Competitions\n"]
+        for c in active:
+            ref = c.get("ref", "?").split("/")[-1]
+            title = c.get("title", ref)
+            deadline = (c.get("deadline", "") or "")[:10]
             lines.append(
-                f"- **{c.get('ref', '?')}**: {c.get('title', c.get('ref', '?'))} "
-                f"(截止: {c.get('deadline', '?')[:10]}, 分类: {c.get('category', '?')})"
+                f"- **{ref}**: {title}\n"
+                f"  截止: {deadline} | 类别: {c.get('category', '?')} | "
+                f"奖励: {c.get('reward', '?')} | 队伍: {c.get('teamCount', '?')}"
             )
-        if len(comps) > 15:
-            lines.append(f"...和其他 {len(comps) - 15} 个比赛")
+
+        if not active:
+            lines.append("⚠️ Kaggle API 未返回活跃比赛。这**不代表没有**——Kaggle API 的列表功能很有限。")
+            lines.append("建议直接访问 https://www.kaggle.com/competitions 查看完整列表。")
+            lines.append(f"\n如果你已经知道比赛名称（如 playground-series-s5e6），直接告诉我就行，我可以直接研究它。")
+
+        if old and len(active) < 10:
+            lines.append(f"\n## 往期比赛 (前 {min(len(old), 5)} 个)")
+            for c in old[:5]:
+                ref = c.get("ref", "?").split("/")[-1]
+                lines.append(f"- {ref} (截止: {(c.get('deadline','') or '')[:10]})")
+
+        lines.append(f"\n💡 **提示**: 如果你已经知道比赛 slug（比如从 Kaggle 网页上看到的），直接告诉我就行，不需要通过列表查找。")
         return "\n".join(lines)
 
     def _tool_research_competition(self, args: dict) -> str:
