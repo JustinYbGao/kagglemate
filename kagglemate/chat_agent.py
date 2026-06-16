@@ -338,6 +338,20 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "deep_research",
+            "description": "深度调研：同时搜索 Kaggle Notebooks、arXiv 论文、网络资源，交叉分析后生成深度调研报告。/ Deep research: search Kaggle + arXiv + Web, cross-analyze with citations. Use this when the user wants thorough research beyond just Kaggle notebooks.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "competition_slug": {"type": "string", "description": "比赛标识 / Competition slug"}
+                },
+                "required": ["competition_slug"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "what_can_i_do",
             "description": "查询当前比赛 Agent 能做什么、不能做什么。在开始使用一个新比赛时调用，了解 Agent 的能力边界。/ Check what the agent can and cannot do for the current competition.",
             "parameters": {
@@ -915,6 +929,40 @@ class ToolExecutor:
 
         return "\n".join(lines)
 
+    def _tool_deep_research(self, args: dict) -> str:
+        slug = args["competition_slug"]
+        self.current_competition = slug
+        _ensure_data(slug)
+
+        from kagglemate.graph.nodes.deep_research_node import run as deep_run
+        from kagglemate.competition_registry import detect_competition_type, get_competition_gate
+
+        # Ensure competition type is registered
+        comp_gate = get_competition_gate()
+        comp_type = detect_competition_type(slug)
+        comp_gate.set_competition_type(slug, comp_type)
+
+        state: KaggleAgentState = _base_state(slug)
+        state["report_dir"] = str(config.COMPETITIONS_DIR / slug / "reports")
+        state["data_dir"] = str(config.COMPETITIONS_DIR / slug / "data" / "raw")
+        state["competition_name"] = slug
+        state["competition_type"] = comp_type.type_id
+
+        # Try to load existing research for context
+        state["notebook_summaries"] = _load_notebook_summaries(slug)
+
+        console.print(f"  [dim]⏳ 深度调研中 ({comp_type.name_zh})...[/]")
+        console.print(f"  [dim]   → Kaggle Notebooks → arXiv 论文 → 网络搜索 → 交叉分析[/]")
+        state.update(deep_run(state))
+
+        report_dir = config.COMPETITIONS_DIR / slug / "reports"
+        report_path = report_dir / "deep_research.md"
+        if report_path.exists():
+            size_kb = report_path.stat().st_size / 1024
+            preview = report_path.read_text()[:1500]
+            return f"## 深度调研完成 — {slug}\n\n**类型**: {comp_type.name_zh} | **报告大小**: {size_kb:.1f} KB | **文件**: `{report_path}`\n\n{preview}\n\n📄 完整报告: `{report_path}`\n\n**下一步**: 输入 '查看 deep_research.md' 阅读完整报告。"
+        return "深度调研报告生成失败。请重试。"
+
     def _tool_what_can_i_do(self, args: dict) -> str:
         slug = args["competition_slug"]
         from kagglemate.competition_registry import detect_competition_type, get_competition_gate, get_type_summary
@@ -955,6 +1003,18 @@ class ToolExecutor:
 
 
 # ── Helpers ──
+
+
+def _load_notebook_summaries(slug: str) -> list:
+    """Try to load existing notebook summaries from prior research."""
+    try:
+        report_path = config.COMPETITIONS_DIR / slug / "reports" / "research_summary.md"
+        if not report_path.exists():
+            return []
+        # Just return a marker — deep research node handles fallback
+        return [{"title": "Prior research exists", "model": "N/A", "key_techniques": ["See research_summary.md"]}]
+    except Exception:
+        return []
 
 
 def _sample_data(data_dir: Path, comp_type: any) -> str:
@@ -1211,6 +1271,7 @@ def _action_description(tool_name: str, args: dict) -> str:
         "validate_submission": "验证提交文件...",
         "read_generated_file": "读取生成的文件...",
         "what_can_i_do": "查询能力边界...",
+        "deep_research": f"深度调研 {slug} (Kaggle+arXiv+Web)...",
         "submit_to_kaggle": f"正在提交到 Kaggle: {slug}...",
         "check_submission_status": f"查询 {slug} 的提交状态...",
         "pull_notebook": f"拉取 Notebook: {args.get('kernel_ref', '')}...",

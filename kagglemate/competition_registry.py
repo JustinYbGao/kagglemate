@@ -58,6 +58,7 @@ class CompetitionType:
         self.can_submit = can_submit
         self.can_research = can_research
         self.can_profile = can_profile
+        self.can_deep_research = True  # all types support deep research
         self.description_zh = description_zh
         self.description_en = description_en
         self.example_slugs = example_slugs or []
@@ -79,6 +80,8 @@ class CompetitionType:
             "validate_submission": self.can_submit,
             "check_submission_status": True,
             "pull_notebook": self.can_research,
+            "deep_research": self.can_deep_research,
+            "what_can_i_do": True,
             "read_generated_file": True,
             "list_competitions": True,
             "inspect_competition": True,
@@ -349,6 +352,8 @@ def get_type_summary(comp_type: CompetitionType) -> str:
         can.append("✅ 模型集成 (simple/weighted/rank average)")
     else:
         cannot.append("❌ 无法自动集成")
+    if comp_type.can_deep_research:
+        can.append("✅ 深度调研 (Kaggle + arXiv 论文 + 网络搜索 + 交叉分析)")
     if comp_type.can_research:
         can.append("✅ 公开 Notebook 调研 + 策略文档")
     if comp_type.can_submit:
