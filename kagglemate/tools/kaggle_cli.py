@@ -58,18 +58,16 @@ class KaggleCLI:
 
     @staticmethod
     def list_competitions(search: str = "", sort_by: str = "recentlyCreated",
-                          page_size: int = 50, category: str = "all") -> list[dict]:
+                          page_size: int = 50, category: str = "all",
+                          group: str = "general") -> list[dict]:
         """List competitions with smart defaults for active/recent competitions.
 
         Args:
             search: Optional search term filter.
             sort_by: Sort order. Default 'recentlyCreated' shows newest first.
-                     Options: grouped, prize, earliestDeadline, latestDeadline,
-                             numberOfTeams, recentlyCreated
             page_size: Results per page (max 200). Default 50.
             category: Competition category. Default 'all'.
-                      Options: all, featured, research, recruitment,
-                              gettingStarted, masters, playground
+            group: 'general' (all) or 'entered' (competitions user has joined).
 
         Returns a list of dicts.
         """
@@ -78,6 +76,7 @@ class KaggleCLI:
             "--sort-by", sort_by,
             "--page-size", str(min(page_size, 200)),
             "--category", category,
+            "--group", group,
         ]
         if search:
             cmd.extend(["--search", search])
@@ -89,11 +88,11 @@ class KaggleCLI:
         reader = csv.DictReader(io.StringIO(result.stdout))
         all_comps = list(reader)
 
-        # Filter out competitions with deadlines > 6 months in the past
-        from datetime import datetime
-        now = datetime.now()
-        cutoff = now.strftime("%Y-%m-%d")
-        # Simple: keep comps where deadline >= 2025 (crude but effective)
+        # When showing entered competitions, return all (don't filter)
+        if group == "entered":
+            return all_comps
+
+        # Filter out competitions with deadlines before 2025
         active = []
         old = []
         for c in all_comps:
@@ -103,7 +102,7 @@ class KaggleCLI:
             else:
                 old.append(c)
 
-        # Show active first, then old (limited)
+        # Show active first, then a few old ones
         return active + old[:5]
         return list(reader)
 
