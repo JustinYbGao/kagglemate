@@ -1,0 +1,38 @@
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ── Environment ──
+.env
+.venv/
+venv/
+
+# ── Competition data (large files) ──
+competitions/
+!competitions/.gitkeep
+
+# ── Kaggle credentials backup ──
+kaggle.json
+*.kaggle/
+
+# ── Database files ──
+*.db
+*.db-journal
+*.db-wal
+
+# ── IDE ──
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── OS ──
+.DS_Store
+Thumbs.db
+
+# ── Notebooks/scripts output ──
+*.ipynb_checkpoints/
