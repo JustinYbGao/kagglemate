@@ -44,8 +44,17 @@ app = typer.Typer(
     name="kagglemate",
     help="Kaggle competition assistant powered by DeepSeek V4 + LangGraph",
     add_completion=False,
+    invoke_without_command=True,
 )
 console = Console()
+
+
+@app.callback()
+def _main_callback(ctx: typer.Context):
+    """Default: start conversational agent. Use --help to see all commands."""
+    if ctx.invoked_subcommand is None:
+        from kagglemate.chat_agent import chat as run_chat
+        run_chat()
 
 
 # ── check ──
@@ -1188,6 +1197,16 @@ def ensemble(
                 console.print(f"\n[bold]Next:[/] python main.py submission submit -c {competition} -f {sub_path}")
             else:
                 console.print(f"  Validation: [red]✗ {len(vr.errors)} errors[/]")
+
+
+# ── chat: conversational agent (default) ──
+
+
+@app.command()
+def chat():
+    """Start the conversational KaggleMate agent (默认对话模式)."""
+    from kagglemate.chat_agent import chat as run_chat
+    run_chat()
 
 
 # ── Entry point ──
