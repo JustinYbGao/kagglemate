@@ -3,16 +3,21 @@
 
 Usage:
     python main.py --help
-    python main.py check                        # Verify setup
-    python main.py list [--search <term>]       # List competitions
-    python main.py inspect <competition-slug>   # Show competition info
-    python main.py research <competition-slug>  # Full research pipeline
-    python main.py profile <competition-slug>   # Data profile only
-    python main.py spec <competition-slug>      # Generate SPEC.md only
-    python main.py baseline <competition-slug>  # Generate baseline script
-    python main.py run <competition-slug>       # Run training script
-    python main.py suggest <competition-slug>   # Get next-step recommendations
-    python main.py experiments <slug> --action list  # View experiment history
+    python main.py check                         # Verify setup
+    python main.py list [--search <term>]        # List competitions
+    python main.py inspect <slug>                # Show competition info
+    python main.py research <slug>               # Full research pipeline
+    python main.py profile <slug>                # Data profile only
+    python main.py spec <slug>                   # Generate SPEC.md only
+    python main.py baseline <slug>               # Generate baseline script
+    python main.py run <slug>                    # Run training script
+    python main.py suggest <slug>                # Get next-step recommendations
+    python main.py experiments <slug> --action list   # View experiment history
+    python main.py notebook pull <ref> -c <slug>      # Pull public notebook
+    python main.py kernel <push|monitor|status> <ref> # Manage Kaggle kernels
+    python main.py submission validate -c <slug> -f <file>  # Validate file
+    python main.py submission submit -c <slug> -f <file>    # Submit (human gate)
+    python main.py submission status -c <slug>              # Check submissions
 """
 
 from __future__ import annotations
@@ -665,6 +670,376 @@ def suggest(competition: str = typer.Argument(..., help="Competition slug, e.g. 
         # Extract recommendations section
         if "## Recommended Next Experiments" in content:
             console.print(content.split("## Recommended Next Experiments")[1].split("---")[0])
+
+
+# ── notebook: pull a public kernel ──
+
+
+@app.command()
+def notebook(
+    action: str = typer.Argument(..., help="Action: pull"),
+    ref: str = typer.Argument(..., help="Kernel reference: username/kernel-name"),
+    competition: str = typer.Option("", "--competition", "-c", help="Competition slug"),
+    target: str = typer.Option("", "--target", "-t", help="Output directory (auto if omitted)"),
+):
+    """Pull a Kaggle notebook WITH metadata preservation (-m flag)."""
+    from kagglemate.graph.nodes.kernel_node import run as kernel_run
+    from kagglemate.graph.state import KaggleAgentState
+    from kagglemate.config import config as cfg
+
+    if action != "pull":
+        console.print("[red]Only 'pull' action is supported for notebooks.[/]")
+        raise typer.Exit(code=1)
+
+    if not competition:
+        console.print("[red]--competition is required (e.g. --competition titanic)[/]")
+        raise typer.Exit(code=1)
+
+    console.print(f"\n[bold cyan]📥 Pulling Notebook[/]\n")
+    console.print(f"  Source: [yellow]{ref}[/]")
+    console.print(f"  Competition: [yellow]{competition}[/]")
+
+    state: KaggleAgentState = {
+        "competition_slug": competition,
+        "kernel_ref": ref,
+        "kernel_action": "pull",
+        "messages": [],
+        "current_phase": "kernel",
+        "errors": [],
+        "best_cv_score": 0.0,
+        "best_lb_score": 0.0,
+        "human_approval_required": False,
+        "human_approved": False,
+    }
+
+    updates = kernel_run(state)
+    errors = updates.get("errors", [])
+
+    if errors:
+        console.print(f"\n[bold red]Pull completed with issues:[/]")
+        for e in errors:
+            console.print(f"  [red]✗ {e}[/]")
+    else:
+        console.print(f"\n[bold green]✅ Notebook pulled successfully![/]")
+
+    kernel_dir = updates.get("kernel_dir", "")
+    if kernel_dir:
+        console.print(f"  Saved to: [cyan]{kernel_dir}[/]")
+        # Show files
+        p = Path(kernel_dir)
+        if p.exists():
+            for f in sorted(p.iterdir()):
+                console.print(f"    📄 {f.name}")
+
+    metadata = updates.get("kernel_metadata")
+    if metadata:
+        console.print(f"\n[bold]Metadata:[/]")
+        console.print(f"  id: [yellow]{metadata.get('id', '?')}[/]")
+        console.print(f"  is_private: {'✅' if metadata.get('is_private') else '⚠️'}")
+        console.print(f"  competition_sources: {metadata.get('competition_sources', [])}")
+        console.print(f"  enable_internet: {'⚠️' if metadata.get('enable_internet') else '✅'}")
+
+        # Hint about what to fix
+        username = config.KAGGLE_USERNAME
+        if username and not metadata.get("id", "").startswith(f"{username}/"):
+            console.print(f"\n[yellow]⚠ Remember to change 'id' to: {username}/<your-kernel-name>[/]")
+
+
+# ── kernel: push / monitor / status ──
+
+
+@app.command()
+def kernel(
+    action: str = typer.Argument(..., help="push | monitor | status"),
+    target: str = typer.Argument("", help="Kernel ref (user/name) or path to kernel directory"),
+    competition: str = typer.Option("", "--competition", "-c", help="Competition slug"),
+    timeout: int = typer.Option(120, "--timeout", "-t", help="Max monitor wait (minutes)"),
+):
+    """Manage Kaggle kernels: push, monitor, or check status."""
+    from kagglemate.graph.nodes.kernel_node import run as kernel_run, MONITOR_MAX_WAIT
+    from kagglemate.graph.state import KaggleAgentState
+    from kagglemate.config import config as cfg
+
+    if action not in ("push", "monitor", "status"):
+        console.print("[red]Action must be: push, monitor, or status[/]")
+        raise typer.Exit(code=1)
+
+    if not target:
+        console.print("[red]Must specify kernel ref or directory path[/]")
+        raise typer.Exit(code=1)
+
+    if action == "push":
+        console.print(f"\n[bold cyan]🚀 Pushing Kernel[/]\n")
+        console.print(f"  Directory: [yellow]{target}[/]")
+
+        state: KaggleAgentState = {
+            "competition_slug": competition or "",
+            "kernel_dir": target,
+            "kernel_action": "push",
+            "messages": [],
+            "current_phase": "kernel",
+            "errors": [],
+            "best_cv_score": 0.0,
+            "best_lb_score": 0.0,
+            "human_approval_required": False,
+            "human_approved": False,
+        }
+
+        updates = kernel_run(state)
+        errors = updates.get("errors", [])
+
+        if errors:
+            console.print(f"\n[bold red]Push FAILED:[/]")
+            for e in errors:
+                console.print(f"  [red]✗ {e}[/]")
+        else:
+            kernel_ref = updates.get("kernel_ref", target)
+            console.print(f"\n[bold green]✅ Kernel pushed![/]")
+            console.print(f"  Ref: [yellow]{kernel_ref}[/]")
+            console.print(f"\n[bold]Monitor:[/] python main.py kernel monitor {kernel_ref}[/]")
+
+    elif action == "monitor":
+        console.print(f"\n[bold cyan]👀 Monitoring Kernel[/]\n")
+        console.print(f"  Kernel: [yellow]{target}[/]")
+        console.print(f"  Timeout: [dim]{timeout} min[/]")
+
+        state: KaggleAgentState = {
+            "competition_slug": competition or "",
+            "kernel_ref": target,
+            "kernel_action": "monitor",
+            "monitor_timeout": timeout * 60,  # pass through state
+            "messages": [],
+            "current_phase": "kernel",
+            "errors": [],
+            "best_cv_score": 0.0,
+            "best_lb_score": 0.0,
+            "human_approval_required": False,
+            "human_approved": False,
+        }
+
+        updates = kernel_run(state)
+        errors = updates.get("errors", [])
+
+        if errors:
+            console.print(f"\n[bold red]Monitor failed:[/]")
+            for e in errors:
+                console.print(f"  [red]✗ {e}[/]")
+
+        results = updates.get("kernel_results", {})
+        if results:
+            console.print(f"\n[bold green]Results parsed from output:[/]")
+            for k, v in results.items():
+                if isinstance(v, float):
+                    console.print(f"  {k}: [yellow]{v:.5f}[/]")
+                else:
+                    console.print(f"  {k}: [yellow]{v}[/]")
+
+        suggestions = updates.get("error_suggestions", [])
+        if suggestions:
+            console.print(f"\n[bold yellow]💡 Suggestions:[/]")
+            for s in suggestions:
+                console.print(f"  • {s}")
+
+    elif action == "status":
+        console.print(f"\n[bold]Kernel Status: [yellow]{target}[/][/]\n")
+
+        state: KaggleAgentState = {
+            "competition_slug": competition or "",
+            "kernel_ref": target,
+            "kernel_action": "status",
+            "messages": [],
+            "current_phase": "kernel",
+            "errors": [],
+            "best_cv_score": 0.0,
+            "best_lb_score": 0.0,
+            "human_approval_required": False,
+            "human_approved": False,
+        }
+
+        updates = kernel_run(state)
+        errors = updates.get("errors", [])
+
+        if errors:
+            for e in errors:
+                console.print(f"  [red]✗ {e}[/]")
+        else:
+            status = updates.get("kernel_status", "unknown")
+            console.print(f"  Status: [yellow]{status}[/]")
+
+
+# ── submission: validate / submit / status ──
+
+
+@app.command()
+def submission(
+    action: str = typer.Argument(..., help="validate | submit | status"),
+    competition: str = typer.Option("", "--competition", "-c", help="Competition slug"),
+    file: str = typer.Option("", "--file", "-f", help="Path to submission CSV"),
+    message: str = typer.Option("kagglemate submission", "--message", "-m", help="Kaggle submission message"),
+    exp_id: int = typer.Option(None, "--exp-id", help="Experiment ID to link this submission to"),
+):
+    """Validate, submit, or check status of Kaggle submissions.
+
+    Submit ALWAYS requires human confirmation (type YES).
+    """
+    from kagglemate.tools.submission_validator import validate
+    from kagglemate.tools.kaggle_cli import KaggleCLI
+    from kagglemate.memory.experiment_store import ExperimentStore
+    from kagglemate.config import config as cfg
+    from pathlib import Path
+
+    if action not in ("validate", "submit", "status"):
+        console.print("[red]Action must be: validate, submit, or status[/]")
+        raise typer.Exit(code=1)
+
+    if action == "validate":
+        if not file or not competition:
+            console.print("[red]--competition and --file are required for validation[/]")
+            raise typer.Exit(code=1)
+
+        console.print(f"\n[bold]🔍 Validating: [yellow]{file}[/] for [yellow]{competition}[/][/]\n")
+
+        data_dir = cfg.COMPETITIONS_DIR / competition / "data" / "raw"
+        vr = validate(file, str(data_dir))
+
+        # Show all checks
+        for c in vr.checks:
+            icon = "[green]✓[/]" if c.passed else "[red]✗[/]"
+            console.print(f"  {icon} {c.check}: {c.detail}")
+
+        if vr.warnings:
+            console.print(f"\n[yellow]Warnings:[/]")
+            for w in vr.warnings:
+                console.print(f"  ⚠ {w}")
+
+        if vr.errors:
+            console.print(f"\n[red]❌ Validation FAILED ({len(vr.errors)} errors):[/]")
+            for e in vr.errors:
+                console.print(f"  ✗ {e}")
+        else:
+            console.print(f"\n[green]✅ Validation passed![/]")
+            console.print(f"  File is ready for submission.")
+            console.print(f"  Run: python main.py submission submit -c {competition} -f {file}")
+
+    elif action == "submit":
+        if not file or not competition:
+            console.print("[red]--competition and --file are required[/]")
+            raise typer.Exit(code=1)
+
+        file_path = Path(file)
+        if not file_path.exists():
+            console.print(f"[red]File not found: {file}[/]")
+            raise typer.Exit(code=1)
+
+        data_dir = cfg.COMPETITIONS_DIR / competition / "data" / "raw"
+
+        # ── Step 1: Validate ──
+        console.print(f"\n[bold]🔍 Pre-submission validation...[/]\n")
+        vr = validate(str(file_path), str(data_dir))
+
+        for c in vr.checks:
+            icon = "[green]✓[/]" if c.passed else "[red]✗[/]"
+            console.print(f"  {icon} {c.check}: {c.detail}")
+
+        if vr.errors:
+            console.print(f"\n[red]❌ Cannot submit — {len(vr.errors)} validation errors.[/]")
+            for e in vr.errors:
+                console.print(f"  ✗ {e}")
+            console.print(f"\n[yellow]Fix the issues above before submitting.[/]")
+            raise typer.Exit(code=1)
+
+        if vr.warnings:
+            console.print(f"\n[yellow]⚠ Warnings (non-blocking):[/]")
+            for w in vr.warnings:
+                console.print(f"  • {w}")
+
+        # ── Step 2: Show preview ──
+        console.print(f"\n[bold]┌{'─'*58}┐[/]")
+        console.print(f"[bold]│[/] [bold white]SUBMISSION PREVIEW — REVIEW BEFORE CONFIRMING[/]     [bold]│[/]")
+        console.print(f"[bold]├{'─'*58}┤[/]")
+        console.print(f"[bold]│[/]  Competition: [yellow]{competition:<46}[/][bold]│[/]")
+        console.print(f"[bold]│[/]  File:       [cyan]{file_path.name:<46}[/][bold]│[/]")
+        console.print(f"[bold]│[/]  Message:    [dim]{message[:46]:<46}[/][bold]│[/]")
+
+        # Show experiment info if available
+        if exp_id:
+            store = ExperimentStore(competition)
+            exp = store.get(exp_id)
+            if exp:
+                cv = f"{exp.get('cv_score', 'N/A')}"
+                console.print(f"[bold]│[/]  Experiment: [yellow]#{exp_id} (CV: {cv})[/]  [bold]│[/]")
+
+        console.print(f"[bold]├{'─'*58}┤[/]")
+        console.print(f"[bold]│[/] [red]⚠ This uses a Kaggle submission slot.[/]             [bold]│[/]")
+        console.print(f"[bold]│[/] [red]⚠ Early scores are inflated — wait 4+ hours.[/]     [bold]│[/]")
+        console.print(f"[bold]│[/] [red]⚠ Have you checked rules_checklist.md?[/]             [bold]│[/]")
+        console.print(f"[bold]└{'─'*58}┘[/]")
+
+        # ── Step 3: HUMAN GATE ──
+        console.print()
+        answer = typer.prompt("Type YES to confirm submission", default="NO")
+        if answer.strip() != "YES":
+            console.print("[yellow]Submission cancelled.[/]")
+            raise typer.Exit(code=0)
+
+        # ── Step 4: Submit ──
+        console.print(f"\n[bold]🚀 Submitting...[/]\n")
+        try:
+            result = KaggleCLI.submit(competition, file_path, message)
+            console.print(f"[green]✅ Submitted![/]")
+            console.print(f"  {result.get('stdout', '')[:200]}")
+        except RuntimeError as e:
+            console.print(f"[red]❌ Submission failed: {e}[/]")
+            raise typer.Exit(code=1)
+
+        # ── Step 5: Link to experiment ──
+        if exp_id:
+            try:
+                store = ExperimentStore(competition)
+                store.update_field(exp_id, "submission_path", str(file_path))
+                console.print(f"\n[green]Linked to experiment #{exp_id}[/]")
+            except Exception:
+                pass
+
+        # ── Step 6: Show next steps ──
+        console.print(f"\n[bold]Next:[/]")
+        console.print(f"  Check status:  python main.py submission status -c {competition}")
+        console.print(f"  Record LB:     python main.py experiments {competition} --action log-lb --id <id> --lb <score>")
+        console.print(f"\n[yellow]Reminder: wait 4+ hours for score to stabilize before judging.[/]")
+
+    elif action == "status":
+        if not competition:
+            console.print("[red]--competition is required[/]")
+            raise typer.Exit(code=1)
+
+        console.print(f"\n[bold]📊 Submission Status: [yellow]{competition}[/][/]\n")
+
+        try:
+            subs = KaggleCLI.submissions(competition)
+        except Exception as e:
+            console.print(f"[red]Failed to fetch submissions: {e}[/]")
+            raise typer.Exit(code=1)
+
+        if not subs:
+            console.print("[dim]No submissions yet.[/]")
+            return
+
+        from rich.table import Table
+        table = Table(title=f"Recent Submissions — {competition}")
+        table.add_column("Date", style="dim")
+        table.add_column("Description")
+        table.add_column("Score", justify="right", style="yellow")
+        table.add_column("Status", style="green")
+
+        for s in subs[:10]:
+            table.add_row(
+                (s.get("date", "") or "")[:19],
+                (s.get("description", "") or "")[:50],
+                s.get("publicScore", "—") or "pending",
+                s.get("status", "?"),
+            )
+
+        console.print(table)
 
 
 # ── Entry point ──

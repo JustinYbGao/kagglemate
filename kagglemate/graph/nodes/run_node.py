@@ -150,7 +150,7 @@ def run(state: KaggleAgentState) -> dict:
 
 def _parse_results(stdout: str) -> dict | None:
     """Extract the === RESULTS === JSON block from script output."""
-    match = re.search(r"=== RESULTS ===\s*\n(.*?)(?:\n\s*$|$)", stdout, re.DOTALL)
+    match = re.search(r"=== RESULTS ===\s*\n(\{.*?\})\s*\n", stdout, re.DOTALL)
     if not match:
         return None
     try:

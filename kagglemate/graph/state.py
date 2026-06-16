@@ -123,3 +123,21 @@ class KaggleAgentState(TypedDict, total=False):
     errors: Annotated[list[str], operator.add]
     human_approval_required: bool
     human_approved: bool
+
+    # ── Kernel operations (Phase 4) ──
+    kernel_action: Optional[str]        # "pull" | "push" | "monitor" | "status"
+    kernel_ref: Optional[str]           # "username/kernel-name"
+    kernel_dir: Optional[str]           # local path to kernel directory
+    kernel_metadata: Optional[dict]     # parsed kernel-metadata.json
+    kernel_status: Optional[str]        # "complete" | "error" | "running" | ...
+    kernel_results: Optional[dict]      # parsed structured results
+    error_suggestions: Optional[list[str]]  # LLM-suggested fixes for kernel errors
+    monitor_timeout: Optional[int]      # max seconds for kernel monitoring
+
+    # ── Submission (Phase 5) ──
+    submission_file: Optional[str]      # path to submission CSV
+    submission_message: Optional[str]   # message for Kaggle submission
+    submission_preview: Optional[str]   # preview text for human approval
+
+    # ── Internal (not part of user-facing state) ──
+    _should_continue: Optional[bool]    # conditional edge routing
