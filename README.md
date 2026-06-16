@@ -1,11 +1,11 @@
-# KaggleMate / 卡钩助手
+# KaggleMate / 竞赛导师
 
-> **Conversational Kaggle competition agent — LangGraph + DeepSeek V4 + multi-source research**
-> **对话式 Kaggle 竞赛 Agent——用自然语言打比赛**
+> **Your Kaggle mentor — not just a tool that executes, but a teacher that helps you learn and improve.**
+> **不只是帮你执行任务的工具，更是帮你**学习**和**成长**的竞赛导师。**
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://python.org)
 [![LangGraph](https://img.shields.io/badge/LangGraph-1.2-green)](https://langchain.com/langgraph)
-[![DeepSeek](https://img.shields.io/badge/DeepSeek-V4%20Pro-purple)](https://platform.deepseek.com)
+[![Multi-LLM](https://img.shields.io/badge/LLM-DeepSeek%20%7C%20OpenAI%20%7C%20Ollama-purple)](https://github.com/JustinYbGao/kagglemate)
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/JustinYbGao/kagglemate?style=social)](https://github.com/JustinYbGao/kagglemate)
 
@@ -13,20 +13,76 @@
 
 ## What is it? / 这是什么？
 
-一个**对话式 Kaggle 竞赛助手**。用自然语言告诉它你想做什么，它会自己调工具、跑代码、分析结果、给你建议。
+一个**竞赛导师**。你在 terminal 里跟它对话，它帮你打比赛，更重要的是——**帮你理解每一件事为什么这么做**。
 
-A **conversational Kaggle competition agent**. Talk to it in natural language — it calls tools, runs code, analyzes results, and recommends next steps autonomously.
+A **competition mentor** that works alongside you. It doesn't just execute — it **explains the WHY** behind every action, turning every competition into a learning experience.
 
+### 任务执行 / Execution
 ```
 km
-你: 帮我看看我参加了哪些比赛
-Agent: 你正在参加 4 个比赛: orbit-wars、neurogolf-2026、rogii-wellbore...
+你: 帮我研究 titanic，生成 baseline，跑一下
+Agent: CV 0.8473，实验 #1 已保存。
+      这个分数比随机高很多，说明 LightGBM 在 891 条数据上也能工作——
+      但 CV/LB 差距大，可能是因为训练集太小，模型学到了噪音。
+      下一步建议: 加正则化或减少叶子数。
+```
 
-你: 深度调研 orbit-wars
-Agent: (搜索 Kaggle + arXiv + Web) → 交叉分析 → 生成 deep_research.md (方法矩阵+论文迁移建议)
+### 代码讲解 / Code Walkthrough
+```
+你: 帮我讲解这个高分 Notebook: alexisbcook/titanic-tutorial
 
-你: 帮我看一下 titanic，生成 baseline 跑一下
-Agent: CV 0.8473，实验 #1 已保存。建议: 加正则化、做特征工程...
+Agent: (拉取 Notebook → 解析代码 → 逐段讲解)
+
+       ## 第1部分：数据加载
+       这里 pd.read_csv() 直接读取。作者没有用 index_col=0，
+       因为 Kaggle 的 test.csv 中 PassengerId 也是从 892 开始的，
+       不是索引...
+
+       ## 第2部分：特征工程
+       从 Name 中提取 Title (Mr/Mrs/Miss) 是 Titanic 的经典技巧。
+       **核心 ML 概念**：特征提取。
+       **为什么有效**：Title 跟生存率强相关——Mrs 的存活率远高于 Mr。
+       直接在 Name 列上做 one-hot 编码会有上千个特征，
+       而提取 Title 只需要 5 个类别。
+
+       ## 要点总结
+       1. 特征工程 > 模型选择（新特征比换模型收益更大）
+       2. 高基数类别要先聚类再编码（不能直接 one-hot）
+       3. 缺失值处理要结合业务逻辑（Age 缺失可能跟 Pclass 相关）
+```
+
+### 概念教学 / Concept Teaching
+```
+你: 什么是 target encoding？在这个比赛里怎么用？
+
+Agent: 用你当前比赛的数据举例——
+
+       Titanic 的 Embarked 列有 3 个值：S、C、Q。
+       普通做法是 label encoding → S=0, C=1, Q=2。
+       但这个数字没有意义——2 并不比 0"大"。
+
+       Target encoding 的做法：用目标变量的统计值替换类别。
+       Embarked='C' 的乘客 Survival rate 是 0.55→用 0.55 替 'C'。
+       这样 C=0.55 就直接意味着"55% 存活率"。
+
+       ⚠️ 陷阱：必须用 cross-validation 来算 target encoding，
+       否则会数据泄露。比如用 fold 2-5 算出的值编码 fold 1。
+
+       要不要我生成一个实验验证一下 target encoding 的效果？
+```
+
+### 实验对比 / Experiment Comparison
+```
+你: 对比实验 2 和实验 3，分析为什么差这么多
+
+Agent: | | 实验 2 (baseline) | 实验 3 (tuned) |
+       | CV | 0.8417 | 0.8539 (+0.012) |
+       | 学习率 | 0.1 | 0.007 |
+       | 正则化 | 无 | reg_alpha=1.53 |
+
+       实验 3 更好的原因：小数据集上正则化比学习率更重要。
+       你可以学到的经验：891 条数据用 default params 容易过拟合。
+       下次可以先从 regularization 入手而不是调 n_estimators。
 ```
 
 ---
@@ -139,15 +195,21 @@ km
 └──────────────────────────┬───────────────────────────────────────┘
                            │
 ┌──────────────────────────▼───────────────────────────────────────┐
-│                    DeepSeek V4 Pro (大脑)                         │
-│          理解意图 → 选择工具 → 综合回复                             │
+│                    LLM (大脑 / Brain)                              │
+│     DeepSeek / OpenAI / Ollama — 理解意图 → 选择工具 → 教学回复     │
+└──────────────────────────┬───────────────────────────────────────┘
+                           │
+┌──────────────────────────▼───────────────────────────────────────┐
+│              🧑‍🏫 Mentor Layer / 导师层 (NEW)                      │
+│   explain_notebook  •  explain_concept  •  compare_approaches    │
+│   "不只是执行——解释每一步为什么这样做"                               │
 └──────────────────────────┬───────────────────────────────────────┘
                            │
 ┌──────────────────────────▼───────────────────────────────────────┐
 │                   ╔═══════ Harness ═══════╗                       │
 │                   ║ 1. Competition Gate  ║ ← 类型能力门控          │
 │                   ║ 2. Risk Confirmation ║ ← 危险操作人工确认       │
-│                   ║ 3. Session Budget    ║ ← 防止 runaway          │
+│                   ║ 3. Session Budget    ║ ← 防 runaway            │
 │                   ║ 4. Audit Trail       ║ ← 不可变审计日志         │
 │                   ╚══════════════════════╝                       │
 │                   LLM CANNOT bypass / 模型无法绕过                 │
@@ -155,19 +217,12 @@ km
                            │
 ┌──────────────────────────▼───────────────────────────────────────┐
 │                     LangGraph StateGraph                         │
-│                                                                   │
-│  Init → Analyze → Research → Plan → Baseline → Run → Evaluate    │
-│    │                                       ↓                      │
-│    │                              ┌───────┴────────┐              │
-│    │                              ▼                ▼              │
-│    │                           Suggest ──▶       END              │
-│    │                              │          (auto-stop)          │
-│    │                              ▼                                │
-│    └── DeepResearch (并行搜索)     END                              │
-│    └── Kernel (pull/push/monitor)                                  │
-│    └── Tune (Optuna)                                               │
-│    └── Ensemble (加权/排序平均)                                     │
-│    └── Submit (Human Gate)                                         │
+│   Init → Analyze → Research → Plan → Baseline → Run → Evaluate  │
+│     │              │            │         │          │    │       │
+│     ▼              ▼            ▼         ▼          ▼    ▼       │
+│  DeepResearch   Kernel       Suggest    Tune    Ensemble  Submit │
+│  (Kaggle+arXiv  (pull/push/  (策略建议)  (Optuna) (3种方法) (Human│
+│   +Web合成)     monitor)                                  Gate)  │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -184,28 +239,27 @@ km
 | 游戏/RL | orbit-wars | ✅ | ✅ | — 需手写 Agent | — | — | ✅ |
 | 图像/文本/音频 | birdclef, NLP | ✅ | ✅ | — 开发中 | — | — | ✅ |
 
-### 18 Conversational Tools / 18 个对话工具
+### 21 Conversational Tools / 21 个对话工具
 
 | 分类 | 工具 | 说明 |
 |---|---|---|
-| 比赛发现 | `list_competitions` | 浏览活跃比赛 / 查看已参加的比赛 |
-| | `inspect_competition` | 查看比赛文件（不下载） |
+| **🧑‍🏫 学习 / Mentor** | **`explain_notebook`** | **拉取+逐段讲解任何 Kaggle Notebook，解释每部分的 ML 概念和思路** |
+| | **`explain_concept`** | **用当前比赛数据讲解任何 ML 概念（target encoding、SHAP、CV 策略...）** |
+| | **`compare_approaches`** | **对比两个实验，分析分数差异原因，总结可迁移的经验** |
 | 调研 | `research_competition` | 基础调研：数据画像 + Kaggle Notebook + SPEC.md |
 | | **`deep_research`** | **深度调研：Kaggle + arXiv 论文 + Web 搜索 + 交叉分析** |
 | | `what_can_i_do` | 查询当前比赛 Agent 能做什么 |
 | | `pull_notebook` | 拉取公开 Notebook（保留 metadata） |
-| 建模 | `generate_baseline` | LLM 设计特征 + 模板生成 LightGBM 脚本 |
+| 建模 | `generate_baseline` | LLM 设计特征 + 模板生成 LightGBM/XGBoost/CatBoost 脚本 |
 | | `run_experiment` | 执行训练，解析 CV，入库 |
 | | `tune_model` | Optuna 超参数调优 |
 | | `ensemble_blend` | 简单平均 / 加权平均 / 排序平均 |
 | 策略 | `get_suggestions` | 基于实验历史推荐下一步 |
-| 实验 | `list_experiments` | 查看实验列表 |
-| | `show_experiment` | 查看实验详情 |
+| 实验 | `list_experiments` / `show_experiment` | 查看实验列表和详情 |
 | | `record_lb_score` | 记录排行榜分数 |
 | 提交 | `validate_submission` | 9 项格式检查 |
-| | `submit_to_kaggle` | 提交（⚠️ 硬拦截：必须人工确认） |
-| | `check_submission_status` | 查看提交状态和榜单 |
-| 文件 | `read_generated_file` | 读取生成的报告 |
+| | `submit_to_kaggle` / `check_submission_status` | 提交（⚠️ 硬拦截：必须人工确认） + 查看榜单 |
+| 比赛 | `list_competitions` / `inspect_competition` / `read_generated_file` | 浏览比赛 / 查看文件 / 读取报告 |
 
 ---
 
@@ -330,12 +384,13 @@ km types                              # 比赛类型注册表
 
 ```
 kagglemate/
-├── chat_agent.py              # 对话 Agent (18 tools + DeepSeek 调度)
+├── chat_agent.py              # 对话 Agent (21 tools + 自然语言调度)
+├── mentor.py                  # 🧑‍🏫 导师层: Notebook讲解/概念教学/实验对比
 ├── harness.py                 # 安全护栏 (5 层安全: 预算/类型/风险/审计/钩子)
-├── competition_registry.py    # 比赛类型注册表 (7 types, 自动检测+能力矩阵)
-├── config.py                  # 配置管理
+├── competition_registry.py    # 比赛类型注册表 (7 种, 自动检测+能力门控)
+├── config.py                  # 多 provider 配置 (DeepSeek/OpenAI/Ollama/...)
 ├── graph/                     # LangGraph 状态机
-│   ├── builder.py             # 15 节点 + 条件边
+│   ├── builder.py             # 16 节点 + 条件边
 │   ├── state.py               # KaggleAgentState TypedDict
 │   └── nodes/
 │       ├── init_node.py       # 下载数据
@@ -392,6 +447,8 @@ kagglemate/
 - [x] Phase 6c: Agent Harness (safety gates + audit + budget) / 安全护栏
 - [x] Phase 6d: Competition Registry (7 types, auto-detect, capability gate) / 比赛类型注册表
 - [x] Phase 6e: Deep Research (Kaggle + arXiv + Web synthesis) / 深度调研
+- [x] Phase 6f: Mentor Mode (notebook walkthrough, concept teaching, experiment comparison) / 导师模式
+- [x] Phase 6g: Multi-Provider LLM (DeepSeek / OpenAI / Ollama / custom) / 多模型支持
 - [ ] Image/Text baseline support / 图像/文本 baseline
 
 ---
