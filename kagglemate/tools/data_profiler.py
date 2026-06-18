@@ -44,6 +44,7 @@ class DataProfiler:
             "id_col": "",
             "numerical_cols": [],
             "categorical_cols": [],
+            "datetime_cols": [],
             "missing_values": {},
             "target_distribution": None,
             "submission_cols": [],
@@ -62,9 +63,13 @@ class DataProfiler:
                 str(col) for col in train_df.columns
                 if pd.api.types.is_numeric_dtype(train_df[col])
             ]
+            profile["datetime_cols"] = [
+                str(col) for col in train_df.columns
+                if pd.api.types.is_datetime64_any_dtype(train_df[col])
+            ]
             profile["categorical_cols"] = [
                 str(col) for col in train_df.columns
-                if str(col) not in profile["numerical_cols"]
+                if str(col) not in profile["numerical_cols"] + profile["datetime_cols"]
             ]
 
             # Column details

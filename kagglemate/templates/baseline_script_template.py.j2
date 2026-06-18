@@ -29,7 +29,7 @@ DATA_DIR = Path("{{ data_dir }}")
 TARGET_COL = "{{ target_col }}"
 ID_COL = "{{ id_col }}"
 N_FOLDS = {{ n_folds }}
-RANDOM_SEED = 42
+RANDOM_SEED = {{ random_seed }}
 
 
 def main():
@@ -101,16 +101,17 @@ def main():
 
     # ── CV strategy / 交叉验证策略 ──
     folds = {{ cv_setup }}
+    {% if group_col %}groups = train["{{ group_col }}"].values{% endif %}
     oof_preds = np.zeros(len(X))
     test_preds = np.zeros(len(X_test))
     {% if is_classification %}test_probs = np.zeros((len(X_test), y.nunique())){% endif %}
 
     params = {{ model_params }}
 
-    print(f"[cv] Starting {N_FOLDS}-fold CV with {{ model_name }} / 开始 {N_FOLDS} 折交叉验证")
+    print(f"[cv] Starting {{ cv_strategy }} with {{ model_name }} / 开始 {{ cv_strategy }} 交叉验证")
 
     fold_scores = []
-    for fold, (train_idx, val_idx) in enumerate(folds.split(X, y)):
+    for fold, (train_idx, val_idx) in enumerate(folds.split({{ cv_split_args }})):
         X_tr, X_val = X.iloc[train_idx], X.iloc[val_idx]
         y_tr, y_val = y.iloc[train_idx], y.iloc[val_idx]
 
@@ -133,14 +134,42 @@ def main():
     cv_std = np.std(fold_scores)
     print(f"[cv] Mean {{ metric_name }} / 平均 {{ metric_name }}: {cv_mean:.5f} ± {cv_std:.5f}")
 
-    # ── Submission / 生成提交文件 ──
+    # ── Save out-of-fold predictions / 保存 OOF 预测 ──
     sub_dir = Path("{{ submission_dir }}")
     sub_dir.mkdir(parents=True, exist_ok=True)
 
+    oof_df = pd.DataFrame({
+        ID_COL: train_ids,
+        "oof_pred": oof_preds,
+    })
+    oof_path = sub_dir / "oof_pred.csv"
+    oof_df.to_csv(oof_path, index=False)
+    print(f"[done] OOF predictions saved / OOF 预测已保存 → {oof_path}")
+
+    # ── Submission / 生成提交文件 ──
+    {% if is_classification %}
+    {% if is_multiclass %}
+    {% if output_probability %}
+    submission = pd.DataFrame(test_probs, columns={{ multiclass_submission_cols }})
+    submission.insert(0, ID_COL, test_ids)
+    {% else %}
     submission = pd.DataFrame({
         ID_COL: test_ids,
-        "{{ submission_target_col }}": {% if is_classification %}test_probs[:, 1] if test_probs.shape[1] == 2 else test_probs.argmax(axis=1){% else %}test_preds{% endif %},
+        "{{ submission_target_col }}": test_probs.argmax(axis=1),
     })
+    {% endif %}
+    {% else %}
+    submission = pd.DataFrame({
+        ID_COL: test_ids,
+        "{{ submission_target_col }}": {% if output_probability %}test_probs[:, 1]{% else %}test_probs.argmax(axis=1){% endif %},
+    })
+    {% endif %}
+    {% else %}
+    submission = pd.DataFrame({
+        ID_COL: test_ids,
+        "{{ submission_target_col }}": test_preds,
+    })
+    {% endif %}
     sub_path = sub_dir / "{{ submission_filename }}"
     submission.to_csv(sub_path, index=False)
     print(f"[done] Submission saved / 提交文件已保存 → {sub_path}")
@@ -167,6 +196,9 @@ def main():
         "fold_scores": [float(s) for s in fold_scores],
         "feature_importance": [(str(name), float(imp)) for name, imp in top_features[:10]],
         "submission_path": str(sub_path),
+        "oof_path": str(oof_path),
+        "config_path": "{{ config_path }}",
+        "cv_plan_summary": "{{ cv_strategy }} (n_splits={{ n_folds }})",
     }, indent=2))
 
 

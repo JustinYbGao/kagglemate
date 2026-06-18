@@ -35,6 +35,7 @@ class DataProfile(TypedDict, total=False):
     id_col: str
     numerical_cols: list[str]
     categorical_cols: list[str]
+    datetime_cols: list[str]
     missing_values: dict[str, float]  # col_name → missing_pct
     target_distribution: Optional[str]
     submission_cols: list[str]
@@ -113,6 +114,7 @@ class KaggleAgentState(TypedDict, total=False):
     all_experiments: Annotated[list[ExperimentRecord], operator.add]
     best_cv_score: float
     best_lb_score: float
+    cv_plan: Optional[dict]
 
     # ── Flow control ──
     current_phase: Literal[

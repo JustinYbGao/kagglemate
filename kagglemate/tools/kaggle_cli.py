@@ -11,6 +11,7 @@ import csv
 import io
 import json
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 from typing import Optional
@@ -47,10 +48,16 @@ class KaggleCLI:
     """Run `kaggle` commands and return structured results."""
 
     @staticmethod
+    def _kaggle_bin() -> str:
+        """Return the path to the kaggle executable in the current Python environment."""
+        return str(Path(sys.executable).with_name("kaggle"))
+
+    @staticmethod
     def _run(cmd: list[str], timeout: int = 60) -> subprocess.CompletedProcess:
         """Run a kaggle CLI command, raise on failure."""
+        full_cmd = [KaggleCLI._kaggle_bin()] + cmd
         return subprocess.run(
-            cmd,
+            full_cmd,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -72,7 +79,7 @@ class KaggleCLI:
         Returns a list of dicts.
         """
         cmd = [
-            "kaggle", "competitions", "list", "--csv",
+            "competitions", "list", "--csv",
             "--sort-by", sort_by,
             "--page-size", str(min(page_size, 200)),
             "--category", category,
@@ -112,7 +119,7 @@ class KaggleCLI:
 
         Returns a list of dicts with keys: name, size, creationDate.
         """
-        cmd = ["kaggle", "competitions", "files", competition_slug, "--csv"]
+        cmd = ["competitions", "files", competition_slug, "--csv"]
         result = KaggleCLI._run(cmd, timeout=30)
         if result.returncode != 0:
             raise RuntimeError(f"kaggle CLI error: {result.stderr}")
@@ -127,7 +134,7 @@ class KaggleCLI:
         target_dir.mkdir(parents=True, exist_ok=True)
 
         result = KaggleCLI._run(
-            ["kaggle", "competitions", "download", "-c", competition_slug,
+            ["competitions", "download", "-c", competition_slug,
              "-p", str(target_dir)],
             timeout=300,  # 5 min for large downloads
         )
@@ -150,7 +157,7 @@ class KaggleCLI:
         totalVotes, medal, etc.
         """
         cmd = [
-            "kaggle", "kernels", "list",
+            "kernels", "list",
             "--competition", competition_slug,
             "--sort-by", sort_by,
             "--csv",
@@ -174,7 +181,7 @@ class KaggleCLI:
         target_dir.mkdir(parents=True, exist_ok=True)
 
         result = KaggleCLI._run(
-            ["kaggle", "kernels", "pull", kernel_ref,
+            ["kernels", "pull", kernel_ref,
              "-p", str(target_dir), "-m"],
             timeout=60,
         )
@@ -187,7 +194,7 @@ class KaggleCLI:
     def push_kernel(kernel_dir: Path) -> dict:
         """Push a kernel to Kaggle. Returns parsed output info."""
         result = KaggleCLI._run(
-            ["kaggle", "kernels", "push", "-p", str(kernel_dir)],
+            ["kernels", "push", "-p", str(kernel_dir)],
             timeout=120,
         )
         if result.returncode != 0:
@@ -199,7 +206,7 @@ class KaggleCLI:
     def kernel_status(kernel_ref: str) -> dict:
         """Get current status of a kernel."""
         result = KaggleCLI._run(
-            ["kaggle", "kernels", "status", kernel_ref],
+            ["kernels", "status", kernel_ref],
             timeout=30,
         )
         status = result.stdout.strip() if result.returncode == 0 else "error"
@@ -209,7 +216,7 @@ class KaggleCLI:
     def submit(competition_slug: str, file_path: Path, message: str = "") -> dict:
         """Submit a prediction file to a competition."""
         cmd = [
-            "kaggle", "competitions", "submit",
+            "competitions", "submit",
             competition_slug,
             "-f", str(file_path),
             "-m", message or "kagglemate submission",
@@ -223,7 +230,7 @@ class KaggleCLI:
     @staticmethod
     def submissions(competition_slug: str) -> list[dict]:
         """List recent submissions for a competition."""
-        cmd = ["kaggle", "competitions", "submissions", competition_slug, "--csv"]
+        cmd = ["competitions", "submissions", competition_slug, "--csv"]
         result = KaggleCLI._run(cmd, timeout=30)
         if result.returncode != 0:
             return []

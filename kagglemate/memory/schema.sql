@@ -15,6 +15,12 @@ CREATE TABLE IF NOT EXISTS experiments (
     params TEXT,                -- JSON object of model hyperparameters
     feature_importance TEXT,    -- JSON array of [name, importance] pairs
     fold_scores TEXT,           -- JSON array of per-fold scores
+    oof_path TEXT,              -- path to out-of-fold predictions CSV
+    fold_scores_path TEXT,      -- path to per-fold scores JSON
+    config_path TEXT,           -- path to experiment_config.json
+    runtime_seconds REAL,       -- script execution time
+    script_hash TEXT,           -- sha256 of training script
+    submission_hash TEXT,       -- sha256 of submission.csv
     submission_path TEXT,
     script_path TEXT,
     report_path TEXT,

@@ -17,6 +17,16 @@
 
 A **competition mentor** that works alongside you. It doesn't just execute — it **explains the WHY** behind every action, turning every competition into a learning experience.
 
+## Scope / 适用范围
+
+| 级别 / Level | 比赛类型 | 说明 |
+|---|---|---|
+| **Stable** | Tabular CSV | 完整 AutoML pipeline：baseline → CV → tuning → ensemble → submit。 |
+| **Experimental** | Deep research / Kernel / Mentor mode | 可用，但需要人工监督与确认。 |
+| **Research-only** | Image / Text / Audio / Code / RL | Agent 可以调研、讲解、讨论策略，**不会自动生成可运行 baseline**。 |
+
+> 当前 MVP 目标是把 **Tabular CSV** 做成稳定、可复现、可追踪的 baseline 工厂。
+
 ### 任务执行 / Execution
 ```
 km
@@ -228,16 +238,29 @@ km
 
 ---
 
+## Benchmark Results / 基准结果
+
+可复现的 Tabular baseline 结果（运行 `python main.py baseline <slug>` + `python main.py run <slug>`）：
+
+| Competition | Type | Metric | CV | Public LB | Status |
+|---|---|---|---|---|---|
+| titanic | binary classification | accuracy | 0.80694 ± 0.00798 | TBD | baseline |
+| playground-series-s6e5 | regression | RMSE | TBD | TBD | baseline |
+
+> 注：TBD 将在 smoke test 后填入实际可复现分数。
+
+---
+
 ## Capabilities / 能力矩阵
 
 ### 按比赛类型 / By Competition Type
 
 | 类型 / Type | 示例 | 调研 | 深度调研 | Baseline | 调参 | 集成 | 提交 |
 |---|---|---|---|---|---|---|---|
-| Tabular CSV | titanic, playground-s6e5 | ✅ | ✅ | ✅ LightGBM/XGBoost/CatBoost | ✅ Optuna | ✅ 3 methods | ✅ |
-| 代码竞赛 | neurogolf-2026 | ✅ | ✅ | — 需手写算法 | — | — | ✅ |
-| 游戏/RL | orbit-wars | ✅ | ✅ | — 需手写 Agent | — | — | ✅ |
-| 图像/文本/音频 | birdclef, NLP | ✅ | ✅ | — 开发中 | — | — | ✅ |
+| **Tabular CSV** | titanic, playground-s6e5 | ✅ | ✅ | ✅ LightGBM/XGBoost/CatBoost | ✅ Optuna | ✅ 3 methods | ✅ |
+| 代码竞赛 | neurogolf-2026 | ✅ | ✅ | — research only | — | — | ✅ |
+| 游戏/RL | orbit-wars | ✅ | ✅ | — research only | — | — | ✅ |
+| 图像/文本/音频 | birdclef, NLP | ✅ | ✅ | — research only | — | — | ✅ |
 
 ### 21 Conversational Tools / 21 个对话工具
 
@@ -449,7 +472,7 @@ kagglemate/
 - [x] Phase 6e: Deep Research (Kaggle + arXiv + Web synthesis) / 深度调研
 - [x] Phase 6f: Mentor Mode (notebook walkthrough, concept teaching, experiment comparison) / 导师模式
 - [x] Phase 6g: Multi-Provider LLM (DeepSeek / OpenAI / Ollama / custom) / 多模型支持
-- [ ] Image/Text baseline support / 图像/文本 baseline
+- [ ] Image/Text baseline support / 图像/文本 baseline — **research-only (no AutoML baseline planned for MVP)**
 
 ---
 
@@ -481,6 +504,7 @@ pip install -e ".[dev]"     # pytest 测试框架
 | arXiv 搜索无结果 / timeout | 国内网络限制 arXiv API | 正常现象——Deep Research 自动跳过，Kaggle+Web 结果仍可用 |
 | `name 'Panel' is not defined` | Rich 库版本问题 | `pip install --upgrade rich` |
 | Baseline 脚本语法错误 | LLM 生成代码偶有瑕疵 | 重新运行 `python main.py baseline`，或手动微调脚本 |
+| Baseline 验证失败 / FE 代码异常 | strategy_validator 拦截了不合法策略 | 查看 `scripts/experiment_config.json` 了解最终使用的策略；系统已自动 fallback 到 heuristic |
 
 ---
 

@@ -82,7 +82,8 @@ def check():
 
     # 3. Kaggle CLI
     import subprocess
-    result = subprocess.run(["kaggle", "--version"], capture_output=True, text=True)
+    kaggle_bin = str(Path(sys.executable).with_name("kaggle"))
+    result = subprocess.run([kaggle_bin, "--version"], capture_output=True, text=True)
     if result.returncode == 0:
         console.print(f"  Kaggle CLI: {result.stdout.strip()}  [green]✓[/]")
     else:

@@ -27,6 +27,12 @@ CREATE TABLE IF NOT EXISTS experiments (
     params TEXT,
     feature_importance TEXT,
     fold_scores TEXT,
+    oof_path TEXT,
+    fold_scores_path TEXT,
+    config_path TEXT,
+    runtime_seconds REAL,
+    script_hash TEXT,
+    submission_hash TEXT,
     submission_path TEXT,
     script_path TEXT,
     report_path TEXT,
@@ -41,6 +47,21 @@ CREATE INDEX IF NOT EXISTS idx_exp_competition ON experiments(competition_slug);
 CREATE INDEX IF NOT EXISTS idx_exp_created ON experiments(created_at);
 CREATE INDEX IF NOT EXISTS idx_exp_cv_score ON experiments(cv_score);
 """
+
+# Columns added after initial schema release — applied idempotently via _migrate().
+MIGRATIONS = [
+    ("oof_path", "TEXT"),
+    ("fold_scores_path", "TEXT"),
+    ("config_path", "TEXT"),
+    ("runtime_seconds", "REAL"),
+    ("script_hash", "TEXT"),
+    ("submission_hash", "TEXT"),
+]
+
+# Indexes that depend on migrated columns.
+MIGRATION_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_exp_script_hash ON experiments(script_hash)",
+]
 
 
 class ExperimentStore:
@@ -58,7 +79,24 @@ class ExperimentStore:
         conn.row_factory = sqlite3.Row
         conn.executescript(SCHEMA_SQL)
         conn.commit()
+        self._migrate(conn)
         return conn
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        """Idempotently add columns introduced in newer schema versions."""
+        existing = {row["name"] for row in conn.execute("PRAGMA table_info(experiments)")}
+        for column, dtype in MIGRATIONS:
+            if column not in existing:
+                try:
+                    conn.execute(f"ALTER TABLE experiments ADD COLUMN {column} {dtype}")
+                except sqlite3.OperationalError:
+                    pass  # Column may already exist despite PRAGMA race
+        for idx_sql in MIGRATION_INDEXES:
+            try:
+                conn.execute(idx_sql)
+            except sqlite3.OperationalError:
+                pass
+        conn.commit()
 
     # ── Create ──
 
@@ -78,6 +116,12 @@ class ExperimentStore:
             "params": self._json(record.get("params", {})),
             "feature_importance": self._json(record.get("feature_importance", [])),
             "fold_scores": self._json(record.get("fold_scores", [])),
+            "oof_path": record.get("oof_path", ""),
+            "fold_scores_path": record.get("fold_scores_path", ""),
+            "config_path": record.get("config_path", ""),
+            "runtime_seconds": record.get("runtime_seconds"),
+            "script_hash": record.get("script_hash", ""),
+            "submission_hash": record.get("submission_hash", ""),
             "submission_path": record.get("submission_path", ""),
             "script_path": record.get("script_path", ""),
             "report_path": record.get("report_path", ""),
@@ -197,6 +241,16 @@ class ExperimentStore:
         if best and best.get("lb_score") is not None:
             return best["cv_score"] - best["lb_score"]
         return None
+
+    def list_submission_hashes(self) -> list[str]:
+        """Return sha256 hashes of all previous completed submissions."""
+        conn = self._conn()
+        rows = conn.execute(
+            "SELECT submission_hash FROM experiments WHERE competition_slug = ? AND submission_hash IS NOT NULL",
+            (self.slug,),
+        ).fetchall()
+        conn.close()
+        return [r["submission_hash"] for r in rows if r["submission_hash"]]
 
     # ── Helpers ──
 
