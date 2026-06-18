@@ -24,7 +24,7 @@ import pandas as pd
 from kagglemate.graph.state import KaggleAgentState
 from kagglemate.tools.llm_client import simple_prompt
 from kagglemate.cv_strategy import generate_cv_plan
-from kagglemate.strategy_validator import validate_and_fix, heuristic_strategy
+from kagglemate.strategy_validator import validate_and_fix, heuristic_strategy, save_validation_report
 
 
 # ── LLM prompt: decide features and strategy ──
@@ -120,8 +120,9 @@ def run(state: KaggleAgentState) -> dict:
         for e in val_result.errors:
             _log(f"Strategy error: {e}")
 
-    # ── Step 4: Persist experiment config ──
+    # ── Step 4: Persist experiment config and strategy validation report ──
     config_path = _write_experiment_config(state, profile, strategy, cv_plan, val_result)
+    report_path = _write_strategy_validation_report(val_result, config_path)
 
     # ── Step 5: Render the training script ──
     script_path = _render_script(state, profile, strategy, cv_plan, config_path)
@@ -130,6 +131,10 @@ def run(state: KaggleAgentState) -> dict:
     experiment = {
         "name": f"baseline_{strategy.get('model_name', 'lgbm').lower().replace(' ', '_')}_001",
         "model": strategy.get("model_name", "LightGBM"),
+        "task_type": comp_type,
+        "target_column": profile.get("target_col", ""),
+        "id_column": profile.get("id_col", ""),
+        "cv_strategy": cv_plan.get("strategy", ""),
         "cv_score": 0.0,
         "cv_std": 0.0,
         "lb_score": None,
@@ -139,6 +144,7 @@ def run(state: KaggleAgentState) -> dict:
         "submission_path": "",
         "script_path": str(script_path),
         "config_path": str(config_path),
+        "strategy_validation_report_path": str(report_path),
         "status": "pending",
     }
 
@@ -224,6 +230,15 @@ def _load_train_test(state: KaggleAgentState, profile: dict) -> tuple[pd.DataFra
         _log(f"Could not load test CSV for validation: {e}")
 
     return train_df, test_df
+
+
+def _write_strategy_validation_report(val_result, config_path: Path) -> Path:
+    """Write strategy validation report next to experiment config."""
+    from kagglemate.strategy_validator import save_validation_report
+    report_path = config_path.parent / "strategy_validation_report.json"
+    save_validation_report(val_result, report_path)
+    _log(f"Saved strategy validation report → {report_path}")
+    return report_path
 
 
 def _write_experiment_config(

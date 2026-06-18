@@ -1,0 +1,9 @@
+{
+  "splitter": "StratifiedKFold",
+  "n_splits": 5,
+  "shuffle": true,
+  "random_state": 42,
+  "group_column": null,
+  "time_column": null,
+  "reason": "Competition type is 'binary_classification' and metric is 'accuracy'. Target appears to be classification with 2 classes. Selected StratifiedKFold to preserve class distribution across 5 folds."
+}

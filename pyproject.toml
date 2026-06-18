@@ -47,6 +47,9 @@ dependencies = [
 
     # ── Notebook parsing (Phase 4+) ──
     "nbformat>=5.0.0",
+
+    # ── Benchmark / config ──
+    "pyyaml>=6.0.0",
 ]
 
 [project.optional-dependencies]

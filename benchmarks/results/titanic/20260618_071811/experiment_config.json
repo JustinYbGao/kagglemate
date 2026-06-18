@@ -1,0 +1,89 @@
+{
+  "competition_slug": "titanic",
+  "competition_type": "binary_classification",
+  "metric": "accuracy",
+  "target_col": "Survived",
+  "id_col": "PassengerId",
+  "model_name": "LightGBM",
+  "model_params": {
+    "n_estimators": 1000,
+    "learning_rate": 0.05,
+    "num_leaves": 31,
+    "random_state": 42,
+    "verbose": -1
+  },
+  "cv_plan": {
+    "strategy": "StratifiedKFold",
+    "n_folds": 5,
+    "shuffle": true,
+    "random_seed": 42,
+    "group_col": null,
+    "date_col": null,
+    "cv_import": "StratifiedKFold",
+    "cv_setup": "StratifiedKFold(n_splits=5, shuffle=True, random_state=42)",
+    "cv_split_args": "X, y",
+    "reasoning": "Competition type is 'binary_classification' and metric is 'accuracy'. Target appears to be classification with 2 classes. Selected StratifiedKFold to preserve class distribution across 5 folds.",
+    "risk_notes": [],
+    "metric": "accuracy",
+    "is_classification": true,
+    "n_classes": 2,
+    "cv_config": {
+      "splitter": "StratifiedKFold",
+      "n_splits": 5,
+      "shuffle": true,
+      "random_state": 42,
+      "group_column": null,
+      "time_column": null,
+      "reason": "Competition type is 'binary_classification' and metric is 'accuracy'. Target appears to be classification with 2 classes. Selected StratifiedKFold to preserve class distribution across 5 folds."
+    }
+  },
+  "src_feature_cols": [
+    "Pclass",
+    "Name",
+    "Sex",
+    "Age",
+    "SibSp",
+    "Parch",
+    "Ticket",
+    "Fare",
+    "Cabin",
+    "Embarked"
+  ],
+  "fe_feature_cols": [],
+  "numerical_cols": [
+    "Parch",
+    "Pclass",
+    "Age",
+    "SibSp",
+    "Fare"
+  ],
+  "categorical_cols": [
+    "Embarked",
+    "Cabin",
+    "Sex",
+    "Ticket",
+    "Name"
+  ],
+  "feature_cols": [
+    "Pclass",
+    "Name",
+    "Sex",
+    "Age",
+    "SibSp",
+    "Parch",
+    "Ticket",
+    "Fare",
+    "Cabin",
+    "Embarked"
+  ],
+  "feature_engineering": "# No custom feature engineering for heuristic baseline.",
+  "seed": 42,
+  "prompt_summary": "You are a Kaggle ML engineer. Based on the data profile below, design the feature strategy for a baseline model.  ## Competition - Type: {competition_type} - Metric: {evaluation_metric} - Target column: {target_col} - ID column: {id_col} - Train shape: {train_rows} rows × {train_cols} cols - Test shape: {test_rows} rows - Submission columns: {submission_cols}  ## Column Details {column_details}  ## Your Job 1. Pick which columns to use as FEATURES (exclude ID column and target column) 2. Identif",
+  "validation_warnings": [
+    "High-cardinality categorical column 'Cabin' (147 unique values); consider target encoding or clustering instead of one-hot.",
+    "High-cardinality categorical column 'Ticket' (681 unique values); consider target encoding or clustering instead of one-hot.",
+    "High-cardinality categorical column 'Name' (891 unique values); consider target encoding or clustering instead of one-hot."
+  ],
+  "validation_errors": [],
+  "generated_at": "2026-06-18 07:18 UTC"
+}

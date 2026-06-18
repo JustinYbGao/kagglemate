@@ -1,0 +1,34 @@
+# Benchmark competition registry for KaggleMate.
+# Each entry defines a stable tabular competition used to evaluate the
+# end-to-end AI-assisted Kaggle workflow.
+
+competitions:
+  - slug: titanic
+    name: Titanic - Machine Learning from Disaster
+    task_type: binary_classification
+    metric: accuracy
+    target_column: Survived
+    id_column: PassengerId
+    expected_submission_columns:
+      - PassengerId
+      - Survived
+
+  - slug: house-prices-advanced-regression-techniques
+    name: House Prices - Advanced Regression Techniques
+    task_type: regression
+    metric: rmse_log
+    target_column: SalePrice
+    id_column: Id
+    expected_submission_columns:
+      - Id
+      - SalePrice
+
+  - slug: spaceship-titanic
+    name: Spaceship Titanic
+    task_type: binary_classification
+    metric: accuracy
+    target_column: Transported
+    id_column: PassengerId
+    expected_submission_columns:
+      - PassengerId
+      - Transported

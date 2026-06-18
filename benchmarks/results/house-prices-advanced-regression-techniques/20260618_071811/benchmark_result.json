@@ -1,0 +1,24 @@
+{
+  "competition": "house-prices-advanced-regression-techniques",
+  "name": "House Prices - Advanced Regression Techniques",
+  "task_type": "regression",
+  "metric": "rmse_log",
+  "target_column": "SalePrice",
+  "id_column": "Id",
+  "expected_submission_columns": [
+    "Id",
+    "SalePrice"
+  ],
+  "workflow_completed": false,
+  "valid_submission": false,
+  "cv_score": null,
+  "cv_std": null,
+  "runtime_seconds": null,
+  "errors": [
+    "Required data not found in /Users/justingao/Documents/kagglemate/competitions/house-prices-advanced-regression-techniques/data/raw. Please download it from Kaggle first, e.g.: kaggle competitions download -c house-prices-advanced-regression-techniques"
+  ],
+  "warnings": [],
+  "artifacts": {},
+  "timestamp": "2026-06-18T07:18:11.330096+00:00",
+  "run_dir": "/Users/justingao/Documents/kagglemate/benchmarks/results/house-prices-advanced-regression-techniques/20260618_071811"
+}

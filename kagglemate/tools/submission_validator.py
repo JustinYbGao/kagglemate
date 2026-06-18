@@ -16,6 +16,7 @@ All checks from agentic-kaggle skill are encoded here:
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -200,7 +201,61 @@ def validate(
         except Exception:
             pass
 
-    # ── Check 8: Submission hash duplicate detection ──
+    # ── Check 8: Duplicate IDs ──
+    if sample is not None:
+        id_col = sample.columns[0] if len(sample.columns) > 0 else None
+        if id_col and id_col in sub.columns:
+            dup_count = int(sub[id_col].duplicated().sum())
+            dup_ok = dup_count == 0
+            checks.append(ValidationCheck(
+                check="no_duplicate_ids", passed=dup_ok,
+                detail=f"{dup_count} duplicate ID values"
+            ))
+            if not dup_ok:
+                errors.append(f"Submission contains {dup_count} duplicate IDs")
+
+    # ── Check 9: Binary classification prediction legality ──
+    if pred_col and _is_binary_classification(metric, sample):
+        vals = pd.to_numeric(sub[pred_col], errors="coerce").dropna()
+        if len(vals) > 0:
+            unique_vals = set(vals.unique())
+            is_binary_labels = unique_vals.issubset({0, 1})
+            is_probability = vals.min() >= 0 and vals.max() <= 1 and not is_binary_labels
+            binary_ok = is_binary_labels or is_probability
+            checks.append(ValidationCheck(
+                check="binary_prediction_legal", passed=binary_ok,
+                detail=f"unique values: {sorted(unique_vals)[:10]}"
+            ))
+            if not binary_ok:
+                errors.append(
+                    f"Binary classification predictions must be {{0,1}} labels or probabilities in [0,1]; "
+                    f"got values like {sorted(unique_vals)[:5]}"
+                )
+
+    # ── Check 10: Regression extreme outliers ──
+    if pred_col and _is_regression(metric):
+        target_stats = _load_target_stats(data_dir)
+        if target_stats is not None:
+            vals = pd.to_numeric(sub[pred_col], errors="coerce").dropna()
+            if len(vals) > 0:
+                tmin, tmax = target_stats["min"], target_stats["max"]
+                q1, q3 = target_stats["q1"], target_stats["q3"]
+                iqr = q3 - q1
+                lower = q1 - 5 * iqr if iqr > 0 else tmin
+                upper = q3 + 5 * iqr if iqr > 0 else tmax
+                out_of_range = ((vals < lower) | (vals > upper)).sum()
+                outlier_ok = int(out_of_range) == 0
+                checks.append(ValidationCheck(
+                    check="regression_outliers", passed=outlier_ok,
+                    detail=f"{int(out_of_range)} predictions outside training target range"
+                ))
+                if not outlier_ok:
+                    warnings.append(
+                        f"Regression predictions contain {int(out_of_range)} values far outside "
+                        f"training target range [{tmin:.4f}, {tmax:.4f}]"
+                    )
+
+    # ── Check 11: Submission hash duplicate detection ──
     current_hash = hashlib.sha256(submission_path.read_bytes()).hexdigest()
     checks.append(ValidationCheck(
         check="submission_hash", passed=True,
@@ -218,7 +273,7 @@ def validate(
         except Exception as e:
             warnings.append(f"Could not check for duplicate submissions: {e}")
 
-    # ── Check 9: Logloss clip reminder ──
+    # ── Check 13: Logloss clip reminder ──
     if pred_col and _is_logloss_like(metric):
         warnings.append(
             "Logloss-like metric detected: consider clipping probabilities with "
@@ -331,6 +386,9 @@ def _guess_prediction_columns(sub: pd.DataFrame) -> list[str]:
 
 def _looks_like_probability_metric(metric: str, sub: pd.DataFrame, sample: Optional[pd.DataFrame]) -> bool:
     """Return True if the metric or sample format suggests probability outputs."""
+    regression_metrics = {"rmse", "mse", "mae", "rmsle", "r2", "mean_squared", "mean_absolute"}
+    if any(m in metric for m in regression_metrics):
+        return False
     probability_metrics = {"auc", "roc_auc", "logloss", "log_loss", "cross_entropy", "binary"}
     if any(m in metric for m in probability_metrics):
         return True
@@ -359,3 +417,90 @@ def _looks_like_probability_metric(metric: str, sub: pd.DataFrame, sample: Optio
 def _is_logloss_like(metric: str) -> bool:
     """Return True for logloss / cross-entropy metrics."""
     return "log" in metric or "cross" in metric
+
+
+def _is_binary_classification(metric: str, sample: Optional[pd.DataFrame]) -> bool:
+    """Return True if the task appears to be binary classification."""
+    regression_metrics = {"rmse", "mse", "mae", "rmsle", "r2", "mean_squared", "mean_absolute"}
+    if any(m in metric for m in regression_metrics):
+        return False
+    binary_metrics = {"auc", "roc_auc", "logloss", "accuracy", "binary", "f1"}
+    if any(m in metric for m in binary_metrics):
+        return True
+    if sample is not None and len(sample.columns) == 2:
+        pred_col = _guess_prediction_column(sample)
+        if pred_col and pred_col in sample.columns:
+            vals = pd.to_numeric(sample[pred_col], errors="coerce").dropna()
+            if len(vals) > 0 and set(vals.unique()).issubset({0, 1}):
+                return True
+    return False
+
+
+def _is_regression(metric: str) -> bool:
+    """Return True if the task appears to be regression."""
+    regression_metrics = {"rmse", "mse", "mae", "rmsle", "r2", "mean_squared", "mean_absolute"}
+    return any(m in metric for m in regression_metrics)
+
+
+def _load_target_stats(data_dir: Path) -> Optional[dict]:
+    """Load train.csv target column stats if available."""
+    train_path = data_dir / "train.csv"
+    if not train_path.exists():
+        return None
+    try:
+        train = pd.read_csv(train_path)
+        # Try common target column names
+        target_candidates = [c for c in train.columns if any(kw in c.lower() for kw in ["target", "label", "survived", "saleprice", "transported"])]
+        if not target_candidates:
+            # Fallback: last column
+            target_candidates = [train.columns[-1]]
+        target_col = target_candidates[0]
+        vals = pd.to_numeric(train[target_col], errors="coerce").dropna()
+        if len(vals) == 0:
+            return None
+        return {
+            "column": target_col,
+            "min": float(vals.min()),
+            "max": float(vals.max()),
+            "q1": float(vals.quantile(0.25)),
+            "q3": float(vals.quantile(0.75)),
+        }
+    except Exception:
+        return None
+
+
+def save_validation_report(result: ValidationResult, path: Path) -> Path:
+    """Persist a submission validation report as JSON.
+
+    Args:
+        result: ValidationResult from validate().
+        path: Destination path.
+
+    Returns:
+        The written path.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    report = {
+        "valid": result.is_valid,
+        "errors": result.errors,
+        "warnings": result.warnings,
+        "checks": [c.model_dump() for c in result.checks],
+        "submission_hash": next(
+            (c.detail.replace("sha256: ", "").replace("...", "") for c in result.checks if c.check == "submission_hash"),
+            "",
+        ),
+        "row_count": next(
+            (int(c.detail.split()[0]) for c in result.checks if c.check == "non_empty" and c.passed),
+            None,
+        ),
+        "columns": [],
+    }
+    cols_check = next((c for c in result.checks if c.check == "has_columns" and c.passed), None)
+    if cols_check:
+        try:
+            report["columns"] = cols_check.detail.split(": ")[1].strip("[]").replace("'", "").split(", ")
+        except Exception:
+            pass
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    return path

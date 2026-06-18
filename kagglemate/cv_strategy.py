@@ -132,7 +132,19 @@ def generate_cv_plan(
         "n_classes": n_classes,
     }
 
+    cv_config = {
+        "splitter": strategy,
+        "n_splits": DEFAULT_N_FOLDS,
+        "shuffle": shuffle,
+        "random_state": DEFAULT_SEED,
+        "group_column": group_col,
+        "time_column": date_col,
+        "reason": reasoning,
+    }
+    plan["cv_config"] = cv_config
+
     _write_plan_md(plan, profile, slug, report_dir)
+    _write_config_json(cv_config, report_dir)
     return plan
 
 
@@ -287,6 +299,23 @@ def _write_plan_md(plan: dict, profile: DataProfile, slug: str, report_dir: Path
         "```\n",
     ]
 
+    lines += [
+        "\n## Validation Code Snippet\n",
+        "```python\n",
+        f"from sklearn.model_selection import {plan['cv_import']}\n",
+        f"folds = {plan['cv_setup']}\n",
+        f"for train_idx, val_idx in folds.split({plan['cv_split_args']}):\n",
+        "    model.fit(X.iloc[train_idx], y.iloc[train_idx])\n",
+        "    val_pred = model.predict(X.iloc[val_idx])\n",
+        "    # compute metric on validation fold\n",
+        "```\n",
+        "\n## When This CV May Be Unreliable\n",
+        "- The target or group structure is more complex than the heuristic detects.\n",
+        "- The dataset has strong temporal autocorrelation not captured by available columns.\n",
+        "- The class distribution varies significantly across folds despite stratification.\n",
+        "- Hidden group structure exists in columns not explicitly named as group-like.\n",
+    ]
+
     if plan["group_col"]:
         lines += ["\n## Group Column\n", f"`{plan['group_col']}`\n"]
     if plan["date_col"]:
@@ -314,4 +343,13 @@ def _write_plan_md(plan: dict, profile: DataProfile, slug: str, report_dir: Path
     ]
 
     path.write_text("".join(lines), encoding="utf-8")
+    return path
+
+
+def _write_config_json(cv_config: dict, report_dir: Path) -> Path:
+    """Write the CV config as machine-readable JSON."""
+    report_dir.mkdir(parents=True, exist_ok=True)
+    path = report_dir / "cv_config.json"
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(cv_config, f, indent=2, ensure_ascii=False)
     return path

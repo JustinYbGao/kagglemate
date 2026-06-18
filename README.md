@@ -27,6 +27,47 @@ A **competition mentor** that works alongside you. It doesn't just execute — i
 
 > 当前 MVP 目标是把 **Tabular CSV** 做成稳定、可复现、可追踪的 baseline 工厂。
 
+## Evaluation / 评估体系
+
+KaggleMate is evaluated as an **AI-assisted Kaggle workflow system**, not an autonomous competition winner.
+
+The benchmark suite measures:
+
+- **End-to-end workflow completion** — can the agent run profiling → CV plan → baseline → validation → experiment tracking without crashing?
+- **Valid submission generation** — does the generated submission match the required schema, row count, ID order, and value constraints?
+- **CV strategy selection** — is the chosen CV splitter appropriate for the task type (classification/regression/time-series/grouped)?
+- **Submission schema validation** — are columns, row order, NaN/inf, probability ranges, and duplicate IDs checked?
+- **Feature strategy robustness** — does the validator prevent target leakage, nonexistent features, and constant columns?
+- **Experiment reproducibility** — are scripts, configs, OOF predictions, fold scores, and run logs persisted with hashes?
+
+### Running the evaluation
+
+```bash
+# Unit tests (no Kaggle data or API required)
+pytest tests/unit -q
+
+# Integration test (skips gracefully if Titanic data is unavailable)
+pytest tests/integration -q
+
+# Benchmark a single competition
+python benchmarks/run_benchmark.py --competition titanic
+
+# Benchmark all configured competitions
+python benchmarks/run_benchmark.py --all
+```
+
+### Benchmark Results
+
+See [`reports/benchmark_summary.md`](reports/benchmark_summary.md) for the latest results.
+
+| Competition | Task Type | Workflow Completed | Valid Submission | CV Score | Runtime | Status |
+|---|---|---:|---:|---:|---:|---:|
+| titanic | Binary Classification | ✅ | ✅ | 0.80694 | 34.3s | Passed |
+
+### Failure Cases
+
+See [`reports/failure_cases.md`](reports/failure_cases.md) for documented robustness tests.
+
 ### 任务执行 / Execution
 ```
 km

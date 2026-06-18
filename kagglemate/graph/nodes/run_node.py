@@ -123,10 +123,13 @@ def run(state: KaggleAgentState) -> dict:
     # ── Validate submission file ──
     validation_ok = True
     validation_errors: list[str] = []
+    validation_report_path = ""
     if submission_path and Path(submission_path).exists():
         try:
-            from kagglemate.tools.submission_validator import validate
+            from kagglemate.tools.submission_validator import validate, save_validation_report
             vr = validate(submission_path, state.get("data_dir", ""), metric=metric, competition_slug=competition_slug)
+            validation_report_path = str(Path(submission_path).parent / "submission_validation_report.json")
+            save_validation_report(vr, Path(validation_report_path))
             if not vr.is_valid:
                 validation_ok = False
                 validation_errors = [e.get("detail", str(e)) for e in vr.checks if not e.get("passed")]
@@ -165,6 +168,8 @@ def run(state: KaggleAgentState) -> dict:
         "submission_hash": submission_hash,
         "submission_path": submission_path,
         "script_path": script_path,
+        "strategy_validation_report_path": exp.get("strategy_validation_report_path", ""),
+        "submission_validation_report_path": validation_report_path,
         "status": "completed" if result.returncode == 0 else "failed",
     })
 
@@ -185,6 +190,7 @@ def run(state: KaggleAgentState) -> dict:
             "oof_path": oof_path,
             "fold_scores_path": str(fold_scores_path),
             "config_path": config_path,
+            "submission_validation_report_path": validation_report_path,
             "runtime_seconds": runtime_seconds,
             "script_hash": script_hash,
             "submission_hash": submission_hash,

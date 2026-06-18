@@ -1,0 +1,40 @@
+{
+  "competition": "titanic",
+  "name": "Titanic - Machine Learning from Disaster",
+  "task_type": "binary_classification",
+  "metric": "accuracy",
+  "target_column": "Survived",
+  "id_column": "PassengerId",
+  "expected_submission_columns": [
+    "PassengerId",
+    "Survived"
+  ],
+  "workflow_completed": true,
+  "valid_submission": true,
+  "cv_score": 0.8069424392693489,
+  "cv_std": 0.007978187898268225,
+  "runtime_seconds": 34.318288803100586,
+  "errors": [],
+  "warnings": [
+    "High-cardinality categorical column 'Cabin' (147 unique values); consider target encoding or clustering instead of one-hot.",
+    "High-cardinality categorical column 'Ticket' (681 unique values); consider target encoding or clustering instead of one-hot.",
+    "High-cardinality categorical column 'Name' (891 unique values); consider target encoding or clustering instead of one-hot.",
+    "Duplicate submission detected: this file has the same hash as a previous submission."
+  ],
+  "artifacts": {
+    "data_profile": "/Users/justingao/Documents/kagglemate/benchmarks/results/titanic/20260618_071038/data_profile.json",
+    "cv_plan": "/Users/justingao/Documents/kagglemate/benchmarks/results/titanic/20260618_071038/cv_plan.md",
+    "cv_config": "/Users/justingao/Documents/kagglemate/benchmarks/results/titanic/20260618_071038/cv_config.json",
+    "experiment_config": "/Users/justingao/Documents/kagglemate/benchmarks/results/titanic/20260618_071038/experiment_config.json",
+    "script": "/Users/justingao/Documents/kagglemate/benchmarks/results/titanic/20260618_071038/train_baseline_lightgbm.py",
+    "fold_scores": "/Users/justingao/Documents/kagglemate/benchmarks/results/titanic/20260618_071038/fold_scores.json",
+    "oof_pred": "/Users/justingao/Documents/kagglemate/benchmarks/results/titanic/20260618_071038/oof_pred.csv",
+    "submission": "/Users/justingao/Documents/kagglemate/benchmarks/results/titanic/20260618_071038/baseline_lightgbm_001.csv",
+    "run_log": "/Users/justingao/Documents/kagglemate/benchmarks/results/titanic/20260618_071038/run_log.txt",
+    "strategy_validation_report": "/Users/justingao/Documents/kagglemate/benchmarks/results/titanic/20260618_071038/strategy_validation_report.json",
+    "submission_validation_report": "/Users/justingao/Documents/kagglemate/benchmarks/results/titanic/20260618_071038/submission_validation_report.json",
+    "benchmark_result": "/Users/justingao/Documents/kagglemate/benchmarks/results/titanic/20260618_071038/benchmark_result.json"
+  },
+  "timestamp": "2026-06-18T07:10:38.064685+00:00",
+  "run_dir": "/Users/justingao/Documents/kagglemate/benchmarks/results/titanic/20260618_071038"
+}
