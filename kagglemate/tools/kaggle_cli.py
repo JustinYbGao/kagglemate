@@ -16,7 +16,6 @@ import zipfile
 from pathlib import Path
 from typing import Optional
 
-from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
 from kagglemate.config import config
@@ -242,7 +241,6 @@ class KaggleCLI:
 # ── LangChain-compatible @tool wrappers ──
 
 
-@tool(args_schema=InitCompetitionInput)
 def list_competitions(search: str = "") -> str:
     """List Kaggle competitions, optionally filtered by a search term.
 
@@ -253,7 +251,6 @@ def list_competitions(search: str = "") -> str:
     return json.dumps(comps, indent=2, ensure_ascii=False)
 
 
-@tool(args_schema=InitCompetitionInput)
 def get_competition_files(competition_slug: str) -> str:
     """List all data files available for a Kaggle competition.
 
@@ -264,7 +261,6 @@ def get_competition_files(competition_slug: str) -> str:
     return json.dumps(files, indent=2, ensure_ascii=False)
 
 
-@tool(args_schema=DownloadDataInput)
 def download_competition_data(competition_slug: str, target_dir: str = "") -> str:
     """Download and extract all data files for a Kaggle competition.
 
@@ -281,3 +277,32 @@ def download_competition_data(competition_slug: str, target_dir: str = "") -> st
         "target_dir": str(target),
         "files": extracted,
     }, indent=2, ensure_ascii=False)
+
+
+def _tool(*args, **kwargs):
+    """Lazy wrapper around langchain_core.tools.tool.
+
+    Importing this module must not require LangChain; the decorator is only
+    resolved when an LLM feature explicitly asks for LangChain tools.
+    """
+    try:
+        from langchain_core.tools import tool as _lc_tool
+    except ImportError as exc:
+        raise RuntimeError(
+            "LangChain dependencies are required to build LangGraph tools. "
+            "Install with: pip install -e '.[llm]"
+        ) from exc
+    return _lc_tool(*args, **kwargs)
+
+
+def get_langchain_tools() -> dict[str, callable]:
+    """Return the Kaggle CLI functions decorated as LangChain tools.
+
+    This is intentionally lazy: LangChain is imported only when the agent
+    graph is being built, not when this module is imported.
+    """
+    return {
+        "list_competitions": _tool(args_schema=InitCompetitionInput)(list_competitions),
+        "get_competition_files": _tool(args_schema=InitCompetitionInput)(get_competition_files),
+        "download_competition_data": _tool(args_schema=DownloadDataInput)(download_competition_data),
+    }

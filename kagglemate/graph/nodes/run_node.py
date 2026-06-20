@@ -20,12 +20,11 @@ import time
 from pathlib import Path
 from datetime import datetime, timezone
 
-from kagglemate.graph.state import KaggleAgentState
 from kagglemate.config import config
 from kagglemate.memory.experiment_store import ExperimentStore
 
 
-def run(state: KaggleAgentState) -> dict:
+def run(state: dict) -> dict:
     """Execute the most recently generated training script.
 
     Returns state updates with experiment results (cv_score, submission_path, etc.).

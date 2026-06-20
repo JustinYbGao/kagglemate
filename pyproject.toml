@@ -21,15 +21,6 @@ classifiers = [
 ]
 
 dependencies = [
-    # ── LangGraph + LangChain (Agent framework) ──
-    "langgraph>=1.0.0",
-    "langchain>=1.0.0",
-    "langchain-openai>=0.3.0",
-    "langchain-core>=1.0.0",
-
-    # ── DeepSeek API (OpenAI-compatible SDK) ──
-    "openai>=1.60.0",
-
     # ── Data science ──
     "pandas>=2.0.0",
     "numpy>=1.24.0",
@@ -61,9 +52,22 @@ ml = [
 tune = [
     "optuna>=4.0.0",
 ]
+llm = [
+    # ── LangGraph + LangChain (Agent framework) ──
+    "langgraph>=1.0.0",
+    "langchain>=1.0.0",
+    "langchain-openai>=0.3.0",
+    "langchain-core>=1.0.0",
+
+    # ── DeepSeek API (OpenAI-compatible SDK) ──
+    "openai>=1.60.0",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
+]
+all = [
+    "kagglemate[ml,tune,llm,dev]"
 ]
 
 [project.scripts]
@@ -71,3 +75,10 @@ kagglemate = "kagglemate.cli:app"
 
 [tool.setuptools.packages.find]
 include = ["kagglemate*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "kaggle_data: marks tests that require real locally downloaded Kaggle data",
+]
+addopts = "-q"

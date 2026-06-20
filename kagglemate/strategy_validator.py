@@ -10,6 +10,7 @@ strategy cannot be made valid, it falls back to a deterministic heuristic.
 from __future__ import annotations
 
 import ast
+import json
 import re
 from pathlib import Path
 from typing import Optional
@@ -17,7 +18,7 @@ from typing import Optional
 import pandas as pd
 from pydantic import BaseModel
 
-from kagglemate.graph.state import DataProfile
+from kagglemate.types import DataProfile
 
 
 SUPPORTED_MODELS = {"lightgbm", "xgboost", "catboost", "lgbm", "xgb"}
@@ -181,13 +182,28 @@ def validate_and_fix(
             )
             issues.append({"type": "high_cardinality", "column": col, "action": "warn_only"})
 
-    # ── 9. Obvious target-leakage column names ──
-    leakage_keywords = {"target", "label", "survived", "saleprice", "transported", "ground_truth"}
+    # ── 9. Target-leakage column name heuristics ──
+    # Exact target/id columns are already removed in step 3. Here we guard
+    # against obvious posterior labels that should never be features, and warn
+    # about columns whose names merely look suspicious.
+    hard_posterior_keywords = {
+        "ground_truth", "answer", "post_outcome", "label_encoded_target",
+        "is_target", "target_label", "true_label",
+    }
+    suspicious_keywords = {"target", "label", "price", "survived", "transported"}
+
     for col in list(strategy["src_feature_cols"]):
-        if any(kw in col.lower() for kw in leakage_keywords):
-            warnings.append(f"Removed potentially leaky column '{col}' based on name heuristic.")
+        col_lower = col.lower()
+        if any(kw in col_lower for kw in hard_posterior_keywords):
+            warnings.append(f"Removed posterior label column '{col}' from features.")
             strategy["src_feature_cols"].remove(col)
             issues.append({"type": "target_leakage_heuristic", "column": col, "action": "removed_from_features"})
+        elif col != target_col and any(kw in col_lower for kw in suspicious_keywords):
+            warnings.append(
+                f"Column '{col}' has a suspicious name but is not the target; "
+                "review before using it as a feature."
+            )
+            issues.append({"type": "suspicious_column_name", "column": col, "action": "warn_only"})
 
     # ── 10. Constant or all-null columns ──
     if train_df is not None:

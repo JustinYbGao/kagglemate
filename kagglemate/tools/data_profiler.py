@@ -13,7 +13,7 @@ from typing import Optional
 import pandas as pd
 import numpy as np
 
-from kagglemate.graph.state import DataProfile, ColumnInfo
+from kagglemate.types import ColumnInfo, DataProfile
 
 
 class DataProfiler:

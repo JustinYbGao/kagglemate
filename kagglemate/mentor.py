@@ -14,8 +14,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from kagglemate.tools.llm_client import simple_prompt
 from kagglemate.config import config
+from kagglemate.tutor.grounded_tutor import answer_tutoring_question
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -208,6 +208,7 @@ def explain_notebook(competition_slug: str, kernel_ref: str,
 
     print("  [mentor] 正在分析 Notebook 代码...")
     try:
+        from kagglemate.tools.llm_client import simple_prompt
         explanation = simple_prompt(prompt)
     except Exception:
         explanation = (
@@ -293,6 +294,7 @@ def explain_concept(concept: str, competition_slug: str,
 
     print(f"  [mentor] 正在讲解: {concept}")
     try:
+        from kagglemate.tools.llm_client import simple_prompt
         return simple_prompt(prompt)
     except Exception:
         return f"## {concept}\n\nLLM 暂时不可用。请在 Kaggle 上搜索 '**{concept}**' 了解详情。"
@@ -382,6 +384,7 @@ def compare_approaches(experiment_a: dict, experiment_b: dict,
 
     print(f"  [mentor] 对比: {a['exp_name']} vs {b['exp_name']}")
     try:
+        from kagglemate.tools.llm_client import simple_prompt
         return simple_prompt(prompt)
     except Exception:
         return (
@@ -393,3 +396,46 @@ def compare_approaches(experiment_a: dict, experiment_b: dict,
             f"| Model | {a['exp_model']} | {b['exp_model']} |\n"
             f"| Features | {a['exp_features']} | {b['exp_features']} |\n"
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Tool 4: grounded_answer / 基于项目证据的答疑
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def grounded_answer(
+    question: str,
+    competition_slug: str | None = None,
+    artifact_dirs: list[Path] | None = None,
+    mode: str = "grounded_explanation",
+    use_llm: bool = False,
+) -> dict:
+    """Answer a tutoring question grounded in local project artifacts.
+
+    This is the offline-first, evidence-based alternative to the purely
+    LLM-driven tutoring functions above.  It retrieves chunks from the
+    competition reports, experiment logs, code notebooks, and ML concept
+    notes, then returns a structured answer that separates confirmed facts,
+    interpretation, uncertainty, and next experiments.
+
+    Args:
+        question: The user's question.
+        competition_slug: Optional competition used to narrow artifact search.
+        artifact_dirs: Optional extra directories to scan.
+        mode: One of ``grounded_explanation``, ``code_walkthrough``,
+            ``experiment_diagnosis``, ``concept_tutor``.
+        use_llm: If True, synthesize with the configured LLM provider.
+            If False (default), return a deterministic structured answer.
+
+    Returns:
+        Dictionary produced by ``answer_tutoring_question()``.
+    """
+    print(f"  [mentor] grounded answer: {question[:60]}...")
+    return answer_tutoring_question(
+        question=question,
+        project_root=config.BASE_DIR,
+        competition_slug=competition_slug,
+        artifact_dirs=artifact_dirs,
+        mode=mode,
+        use_llm=use_llm,
+    )

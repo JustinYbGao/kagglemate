@@ -16,12 +16,27 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from openai import OpenAI
+import pytest
+
 from kagglemate.config import config
+
+def _openai_available():
+    try:
+        import openai  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not config.LLM_API_KEY or not _openai_available(),
+    reason="LLM_API_KEY not set or openai package not installed — skipping live LLM test",
+)
 
 
 def test_single_tool_call():
     """Test: model calls the right tool with the right arguments."""
+    from openai import OpenAI
     client = OpenAI(
         api_key=config.LLM_API_KEY,
         base_url=config.LLM_BASE_URL,
@@ -92,6 +107,7 @@ def test_single_tool_call():
 
 def test_multi_tool_selection():
     """Test: given multiple tools, model picks the correct one."""
+    from openai import OpenAI
     client = OpenAI(
         api_key=config.LLM_API_KEY,
         base_url=config.LLM_BASE_URL,
@@ -184,6 +200,7 @@ def test_multi_tool_selection():
 
 def test_tool_call_with_structured_output():
     """Test: multi-turn — model calls a tool, we simulate the result, model responds."""
+    from openai import OpenAI
     client = OpenAI(
         api_key=config.LLM_API_KEY,
         base_url=config.LLM_BASE_URL,
@@ -254,6 +271,7 @@ def test_tool_call_with_structured_output():
 
 def test_code_generation():
     """Test: model can generate a simple training script from a prompt."""
+    from openai import OpenAI
     client = OpenAI(
         api_key=config.LLM_API_KEY,
         base_url=config.LLM_BASE_URL,
@@ -314,6 +332,7 @@ def test_code_generation():
 
 
 def main():
+    from openai import OpenAI
     print("DeepSeek V4 Pro Tool Calling Verification\n")
     print(f"  Model: {config.LLM_MODEL}")
     masked = config.LLM_API_KEY[:8] + "..." + config.LLM_API_KEY[-4:]

@@ -14,8 +14,8 @@ from typing import Optional
 
 import pandas as pd
 
-from kagglemate.graph.state import DataProfile
 from kagglemate.config import config
+from kagglemate.types import DataProfile
 
 
 DEFAULT_SEED = 42

@@ -19,10 +19,10 @@ A **competition mentor** that works alongside you. It doesn't just execute — i
 
 ## Scope / 适用范围
 
-| 级别 / Level | 比赛类型 | 说明 |
+| 级别 / Level | 能力 | 说明 |
 |---|---|---|
-| **Stable** | Tabular CSV | 完整 AutoML pipeline：baseline → CV → tuning → ensemble → submit。 |
-| **Experimental** | Deep research / Kernel / Mentor mode | 可用，但需要人工监督与确认。 |
+| **Stable** | Tabular baseline workflow | Data profiling → CV plan → baseline script → submission validation → experiment tracking。默认使用 **offline synthetic benchmark**，无需 Kaggle API/数据/LLM。 |
+| **Experimental** | Tuning / Ensembling / Kernel / Deep research / Real Kaggle API benchmark | 可用，但尚未被 offline benchmark 证明稳定；需要人工监督或真实数据。 |
 | **Research-only** | Image / Text / Audio / Code / RL | Agent 可以调研、讲解、讨论策略，**不会自动生成可运行 baseline**。 |
 
 > 当前 MVP 目标是把 **Tabular CSV** 做成稳定、可复现、可追踪的 baseline 工厂。
@@ -43,27 +43,60 @@ The benchmark suite measures:
 ### Running the evaluation
 
 ```bash
-# Unit tests (no Kaggle data or API required)
+# Unit tests (no Kaggle data, API, or LLM required)
 pytest tests/unit -q
 
-# Integration test (skips gracefully if Titanic data is unavailable)
+# Integration test (uses offline synthetic fixtures by default)
 pytest tests/integration -q
 
-# Benchmark a single competition
-python benchmarks/run_benchmark.py --competition titanic
+# Synthetic benchmark a single competition (no Kaggle credentials)
+python benchmarks/run_benchmark.py --competition titanic --synthetic
 
-# Benchmark all configured competitions
-python benchmarks/run_benchmark.py --all
+# Dry-run all configured competitions (generates scripts/reports, skips training)
+python benchmarks/run_benchmark.py --all --synthetic --dry-run
+
+# Full offline benchmark for all configured competitions
+python benchmarks/run_benchmark.py --all --synthetic
+
+# Regenerate markdown reports from benchmark results
+python benchmarks/update_reports.py
+```
+
+### Offline Verification
+
+After installing with `[dev]` (no `[llm]` required):
+
+```bash
+pytest tests/unit -q
+pytest tests/integration -q
+python benchmarks/run_benchmark.py --all --synthetic --dry-run
+python benchmarks/update_reports.py
+```
+
+To run the full synthetic benchmark (generates and executes training scripts),
+you also need the ML models:
+
+```bash
+pip install -e ".[ml]"
+python benchmarks/run_benchmark.py --competition titanic --synthetic
+```
+
+The offline path does not require Kaggle credentials, LLM API keys, or LangChain dependencies unless `use_llm=True`.
+
+To run against real Kaggle data, download the data and use `--data-dir`:
+
+```bash
+python benchmarks/run_benchmark.py --competition titanic --data-dir competitions/titanic/data/raw
 ```
 
 ### Benchmark Results
 
 See [`reports/benchmark_summary.md`](reports/benchmark_summary.md) for the latest results.
 
-| Competition | Task Type | Workflow Completed | Valid Submission | CV Score | Runtime | Status |
-|---|---|---:|---:|---:|---:|---:|
-| titanic | Binary Classification | ✅ | ✅ | 0.80694 | 34.3s | Passed |
-
+```bash
+python benchmarks/run_benchmark.py --all --synthetic
+python benchmarks/update_reports.py
+```
 ### Failure Cases
 
 See [`reports/failure_cases.md`](reports/failure_cases.md) for documented robustness tests.
@@ -138,6 +171,95 @@ Agent: | | 实验 2 (baseline) | 实验 3 (tuned) |
 
 ---
 
+## Grounded Tutoring
+
+KaggleMate includes a grounded tutoring layer to reduce unsupported ML recommendations. Instead of answering only from the model's prior knowledge, tutoring responses can retrieve evidence from:
+
+- CV plans (`CV_PLAN.md`, `cv_config.json`)
+- Data profiles (`data_profile.md`, `data_profile.json`)
+- Benchmark results (`benchmark_result.json`)
+- Experiment records (`experiments.db`)
+- Strategy validation reports (`strategy_validation_report.json`)
+- Submission validation reports (`submission_validation_report.json`)
+- Experiment configs (`experiment_config.json`)
+- Run logs (`run_log.txt`)
+- Notebook / code chunks (`.py`, `.ipynb`)
+- ML concept notes (`docs/ml_concepts/*.md`)
+
+Tutoring responses separate:
+
+- **Confirmed facts** from artifacts
+- **Interpretation** of those facts
+- **Uncertainty** when evidence is insufficient
+- **Next verifiable experiment** to reduce uncertainty
+
+### Experiment Diagnosis
+
+The grounded tutor can read experiment artifacts and, when available, `experiments.db` records to explain model iteration results. It separates observed facts from hypotheses and avoids attributing score changes to features unless ablation evidence exists.
+
+```python
+from pathlib import Path
+from kagglemate.tutor.grounded_tutor import answer_tutoring_question
+
+result = answer_tutoring_question(
+    question="Why did experiment 2 perform worse than experiment 1?",
+    project_root=Path("."),
+    competition_slug="titanic",
+    mode="experiment_diagnosis",
+    use_llm=False,
+)
+print(result["answer"])
+```
+
+When `mode="experiment_diagnosis"`, the answer includes four sections:
+
+1. **Experiment facts from artifacts** — what was actually recorded.
+2. **Diagnosis** — conservative interpretation of the facts.
+3. **What cannot be concluded yet** — missing evidence (LB scores, fold scores, OOF, validation reports).
+4. **Next verifiable experiments** — concrete ablations or re-runs to reduce uncertainty.
+
+See [`examples/grounded_tutoring_demo.md`](examples/grounded_tutoring_demo.md) for example tutoring outputs.
+
+### Example
+
+```python
+from pathlib import Path
+from kagglemate.tutor.grounded_tutor import answer_tutoring_question
+
+result = answer_tutoring_question(
+    question="Why does target encoding risk leakage in this competition?",
+    project_root=Path("."),
+    competition_slug="titanic",
+    mode="concept_tutor",
+    use_llm=False,
+)
+print(result["answer"])
+```
+
+`use_llm=False` runs completely offline and is the default, which makes it safe for tests and environments without API keys. `use_llm=True` synthesizes a response with the configured LLM provider while still requiring citations to retrieved chunks.
+
+> **Disclaimer**: The grounded tutor does not guarantee model correctness. It reduces hallucination by forcing answers to cite local project artifacts and by explicitly marking uncertain claims that require experiments. Grounded tutoring reduces unsupported recommendations but does not prove that a modeling idea improves leaderboard performance. Performance claims require experiment artifacts or benchmark results.
+
+---
+
+## Installation
+
+For offline benchmark, validation, and grounded tutoring:
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+For LLM-powered mentoring / agent features:
+
+```bash
+python -m pip install -e ".[dev,llm]"
+```
+
+The `[dev]` extra includes pytest and pytest-asyncio; the `[llm]` extra includes LangGraph, LangChain, and the OpenAI SDK. The offline path does not require Kaggle credentials, LLM API keys, or LangChain dependencies unless `use_llm=True`.
+
+---
+
 ## Quick Start / 快速开始
 
 ### Step 1: Clone & Install / 克隆并安装
@@ -147,6 +269,17 @@ git clone https://github.com/JustinYbGao/kagglemate.git
 cd kagglemate
 python3.10 -m venv .venv          # Python 3.10+ required / 需要 Python 3.10+
 source .venv/bin/activate
+
+# Offline evaluation + grounded tutoring (no LLM/Kaggle API needed)
+pip install -e ".[dev]"
+
+# OR full agent features (requires LLM API key in .env)
+pip install -e ".[dev,llm]"
+```
+
+If you are only running tabular baselines, you also need the ML models:
+
+```bash
 pip install -e ".[ml]"
 ```
 
@@ -281,14 +414,19 @@ km
 
 ## Benchmark Results / 基准结果
 
-可复现的 Tabular baseline 结果（运行 `python main.py baseline <slug>` + `python main.py run <slug>`）：
+Offline synthetic benchmark 结果（无需 Kaggle API/数据/LLM）：
 
-| Competition | Type | Metric | CV | Public LB | Status |
+| Competition | Type | Metric | CV | Runtime | Status |
 |---|---|---|---|---|---|
-| titanic | binary classification | accuracy | 0.80694 ± 0.00798 | TBD | baseline |
-| playground-series-s6e5 | regression | RMSE | TBD | TBD | baseline |
+| titanic | binary classification | accuracy | see latest run | see latest run | baseline |
+| house-prices-advanced-regression-techniques | regression | rmse_log | see latest run | see latest run | baseline |
+| spaceship-titanic | binary classification | accuracy | see latest run | see latest run | baseline |
 
-> 注：TBD 将在 smoke test 后填入实际可复现分数。
+运行 `python benchmarks/run_benchmark.py --all --synthetic` + `python benchmarks/update_reports.py` 查看最新结果。
+
+See [`reports/benchmark_summary.md`](reports/benchmark_summary.md) for the latest results.
+
+> 注：Public LB 分数需要真实 Kaggle 数据与提交，属于 Experimental 能力，不在默认 offline benchmark 范围内。
 
 ---
 
@@ -529,9 +667,11 @@ kagglemate/
 ### Optional Dependencies / 可选依赖
 
 ```bash
-pip install -e ".[ml]"      # LightGBM + XGBoost + CatBoost（Tabular baseline 必需）
-pip install -e ".[tune]"    # Optuna 超参数优化
-pip install -e ".[dev]"     # pytest 测试框架
+pip install -e ".[ml]"        # LightGBM + XGBoost + CatBoost（Tabular baseline 必需）
+pip install -e ".[tune]"      # Optuna 超参数优化
+pip install -e ".[llm]"       # LangGraph + LangChain + OpenAI SDK（Agent / LLM 功能必需）
+pip install -e ".[dev]"       # pytest 测试框架
+pip install -e ".[dev,llm]"   # 完整开发 + LLM 功能
 ```
 
 ## Troubleshooting / 常见问题

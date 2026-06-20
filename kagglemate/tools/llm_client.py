@@ -9,9 +9,6 @@ and transforms between LangChain's ChatOpenAI and raw OpenAI client.
 
 from __future__ import annotations
 
-from langchain_openai import ChatOpenAI
-from openai import OpenAI
-
 from kagglemate.config import config
 
 
@@ -19,13 +16,38 @@ def _is_deepseek() -> bool:
     return config.LLM_PROVIDER == "deepseek"
 
 
-def get_llm(use_flash: bool = False) -> ChatOpenAI:
+def _require_openai():
+    """Lazy import the OpenAI SDK with a helpful error message."""
+    try:
+        from openai import OpenAI
+    except ImportError as exc:
+        raise RuntimeError(
+            "OpenAI SDK is required for LLM features. "
+            "Install with: pip install -e '.[llm]'"
+        ) from exc
+    return OpenAI
+
+
+def _require_chat_openai():
+    """Lazy import LangChain's ChatOpenAI with a helpful error message."""
+    try:
+        from langchain_openai import ChatOpenAI
+    except ImportError as exc:
+        raise RuntimeError(
+            "LangChain dependencies are required for LLM features. "
+            "Install with: pip install -e '.[llm]'"
+        ) from exc
+    return ChatOpenAI
+
+
+def get_llm(use_flash: bool = False):
     """Get a LangChain-compatible ChatOpenAI instance.
 
     Args:
         use_flash: If True, use the cheaper/faster model (e.g. V4 Flash, GPT-4.1-mini).
                    Defaults to the main model.
     """
+    ChatOpenAI = _require_chat_openai()
     model = config.LLM_FLASH_MODEL if use_flash else config.LLM_MODEL
 
     kwargs = dict(
@@ -45,12 +67,13 @@ def get_llm(use_flash: bool = False) -> ChatOpenAI:
     return ChatOpenAI(**kwargs)
 
 
-def get_llm_with_thinking() -> ChatOpenAI:
+def get_llm_with_thinking():
     """Get an LLM with extended reasoning (provider-specific).
 
     Only DeepSeek supports a native thinking mode.
     For other providers, this returns the standard llm.
     """
+    ChatOpenAI = _require_chat_openai()
     if _is_deepseek():
         return ChatOpenAI(
             model=config.LLM_MODEL,
@@ -74,8 +97,9 @@ def get_llm_with_thinking() -> ChatOpenAI:
     )
 
 
-def get_raw_client() -> OpenAI:
+def get_raw_client():
     """Get the raw OpenAI client for fine-grained control."""
+    OpenAI = _require_openai()
     return OpenAI(
         api_key=config.LLM_API_KEY,
         base_url=config.LLM_BASE_URL,
@@ -88,7 +112,12 @@ def simple_prompt(prompt: str, use_flash: bool = False) -> str:
 
     The simplest possible LLM call — for when you just need text back.
     """
-    client = get_raw_client()
+    OpenAI = _require_openai()
+    client = OpenAI(
+        api_key=config.LLM_API_KEY,
+        base_url=config.LLM_BASE_URL,
+        timeout=180,
+    )
     model = config.LLM_FLASH_MODEL if use_flash else config.LLM_MODEL
 
     extra_body = {}
