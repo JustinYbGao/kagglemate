@@ -54,8 +54,19 @@ console = Console()
 def _main_callback(ctx: typer.Context):
     """Default: start conversational agent. Use --help to see all commands."""
     if ctx.invoked_subcommand is None:
-        from kagglemate.chat_agent import chat as run_chat
-        run_chat()
+        try:
+            from kagglemate.chat_agent import chat as run_chat
+            run_chat()
+        except (ImportError, ModuleNotFoundError) as exc:
+            console.print("\n[bold red]Conversational agent requires LLM dependencies.[/]\n")
+            print("Install them with:")
+            print("  pip install -e '.[llm]'")
+            print("")
+            print("Or use offline commands:")
+            print("  km tutor 'your question' --offline")
+            print("  km benchmark --competition titanic --synthetic --dry-run")
+            print("")
+            raise typer.Exit(code=1) from exc
 
 
 # ── check ──
@@ -1308,6 +1319,105 @@ def harness(action: str = typer.Argument("status", help="status | audit | clear"
 
     else:
         console.print("[yellow]Usage: python main.py harness [status|audit|clear][/]")
+
+
+# ── tutor: offline grounded tutoring ──
+
+
+@app.command()
+def tutor(
+    question: str = typer.Argument(..., help="Question to answer based on project artifacts"),
+    mode: str = typer.Option("concept_tutor", "--mode", "-m",
+                             help="concept_tutor | code_walkthrough | experiment_diagnosis | grounded_explanation"),
+    competition: str = typer.Option("", "--competition", "-c", help="Competition slug to narrow artifact search"),
+    project_root: Path = typer.Option(Path("."), "--project-root", help="Root directory of the KaggleMate project"),
+    offline: bool = typer.Option(True, "--offline/--online", help="Use offline deterministic path (default) or LLM synthesis"),
+    show_sources: bool = typer.Option(False, "--show-sources", help="Print retrieved artifact sources"),
+    top_k: int = typer.Option(6, "--top-k", help="Number of artifact chunks to retrieve"),
+):
+    """Answer a question grounded in local project artifacts (offline by default)."""
+    from kagglemate.tutor.grounded_tutor import answer_tutoring_question
+
+    result = answer_tutoring_question(
+        question=question,
+        project_root=project_root,
+        competition_slug=competition or None,
+        mode=mode,
+        use_llm=not offline,
+        top_k=top_k,
+    )
+
+    console.print(f"\n[bold cyan]🧑‍🏫 KaggleMate Tutor[/]  [dim]mode={mode} offline={offline}[/]\n")
+    console.print(Panel(result["answer"], title="Answer", border_style="blue"))
+
+    if show_sources:
+        sources = result.get("sources", [])
+        if sources:
+            console.print("\n[bold]Sources:[/]")
+            for src in sources:
+                console.print(f"  • [{src.get('source_type')}] {src.get('source_path')}")
+        else:
+            console.print("\n[dim]No artifact sources were retrieved.[/]")
+
+
+# ── ask: alias for tutor ──
+
+
+@app.command(name="ask")
+def ask(
+    question: str = typer.Argument(..., help="Question to answer based on project artifacts"),
+    mode: str = typer.Option("concept_tutor", "--mode", "-m",
+                             help="concept_tutor | code_walkthrough | experiment_diagnosis | grounded_explanation"),
+    competition: str = typer.Option("", "--competition", "-c", help="Competition slug to narrow artifact search"),
+    project_root: Path = typer.Option(Path("."), "--project-root", help="Root directory of the KaggleMate project"),
+    offline: bool = typer.Option(True, "--offline/--online", help="Use offline deterministic path (default) or LLM synthesis"),
+    show_sources: bool = typer.Option(False, "--show-sources", help="Print retrieved artifact sources"),
+    top_k: int = typer.Option(6, "--top-k", help="Number of artifact chunks to retrieve"),
+):
+    """Alias for `tutor`. Answer a question grounded in local project artifacts."""
+    tutor(
+        question=question,
+        mode=mode,
+        competition=competition,
+        project_root=project_root,
+        offline=offline,
+        show_sources=show_sources,
+        top_k=top_k,
+    )
+
+
+# ── benchmark: run offline synthetic benchmark ──
+
+
+@app.command()
+def benchmark(
+    competition: str = typer.Option("", "--competition", "-c", help="Competition slug (omit with --all to run all)"),
+    all_competitions: bool = typer.Option(False, "--all", help="Run all configured competitions"),
+    synthetic: bool = typer.Option(False, "--synthetic", help="Use offline synthetic fixtures"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Generate scripts but do not execute"),
+    data_dir: str = typer.Option("", "--data-dir", help="Path to a custom competition data directory"),
+):
+    """Run the KaggleMate benchmark suite."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).parent))
+    from benchmarks.run_benchmark import main as run_benchmark_main
+
+    argv = ["run_benchmark.py"]
+    if competition:
+        argv.extend(["--competition", competition])
+    elif all_competitions:
+        argv.append("--all")
+    if synthetic:
+        argv.append("--synthetic")
+    if dry_run:
+        argv.append("--dry-run")
+    if data_dir:
+        argv.extend(["--data-dir", data_dir])
+
+    sys.argv = argv
+    raise SystemExit(run_benchmark_main())
 
 
 # ── chat: conversational agent (default) ──
